@@ -1,14 +1,39 @@
-# Python用
+# Pythonが自動生成するキャッシュファイル・フォルダ
 __pycache__/
-*.pyc
-.env/
-.venv/
-env/
-venv/
+*.py[cod]
+*$py.class
 
-# OS用
+# 仮想環境フォルダ（uv sync や python -m venv で生成される環境）
+.venv/
+venv/
+ENV/
+env/
+
+# uv が生成するキャッシュや管理フォルダ
+.uv/
+
+# Whisperが初回実行時にダウンロードする学習済みモデルのキャッシュ（各自のPCに保存されるため不要）
+.cache/
+
+# dataフォルダ
+data/
+
+# 外部ツール（ffmpeg）やスクリプトが生成した動画・音声データ
+# ※誤って本番用動画や巨大な音声ファイルをGitHub等にアップロードするのを防ぎます
+*.mp4
+*.mov
+*.mkv
+*.avi
+*.wmv
+*.flv
+*.webm
+*.m4a
+*.mp3
+*.wav
+
+# スクリプトが自動生成した字幕ファイル（SRT）
+*.srt
+
+# OSが自動生成する隠しファイル
 .DS_Store
 Thumbs.db
-
-# dataフォルダ用
-data/

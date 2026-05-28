@@ -25,13 +25,23 @@ winget install Gyan.FFmpeg
 ```
 ※インストール後、設定を反映させるために一度ターミナル（またはPC）を再起動してください。
 
-### 2. uv による仮想環境の構築とライブラリのインストール
-本プロジェクトでは、高速なパッケージ管理ツール uv を使用して環境を構築します。プロジェクトのルートフォルダ（whisper-srt）で以下のコマンドを実行してください。
+### 2. ライブラリのインストール
+ご利用の開発環境（uv、または通常の pip）に合わせて、どちらか片方の手順を行ってください。
 
+#### パターンA：uv を使用する場合（推奨）
+プロジェクトのルートフォルダ（whisper-srt）で以下のコマンドを実行するだけで、必要なライブラリが自動ですべてインストールされます。
+
+```PowerShell
+uv sync
+```
+※仮想環境の作成やアクティベート、requirements.txt の管理は不要です。
+
+##### 仮想環境を作成する場合
 1. 仮想環境（.venv フォルダ）の作成
 ```PowerShell
 uv venv
 ```
+
 2. 仮想環境のアクティベート（有効化）
 ```PowerShell
 .venv\Scripts\Activate.ps1
@@ -39,10 +49,23 @@ uv venv
 ※アクティベートに成功すると、ターミナルの先頭に (env) と表示されます。
 ※スクリプト実行エラーが出る場合は、事前に `Set-ExecutionPolicy RemoteSigned -Scope Process` を実行してください。
 
-3. 依存ライブラリの一括インストール
-仮想環境がアクティベートされた状態で、requirements.txt を使って必要なライブラリを一括インストールします。
+##### requirements.txtからインストールする場合
 ```PowerShell
 uv pip install -r requirements.txt
+```
+※uvを使う場合はrequirements.txtを参照せずpyproject.tomlを参照したほうが良いです。
+
+#### パターンB：通常の pip を使用する場合（uv を使わない場合）
+仮想環境（.venv）を作成して有効化します。
+
+```PowerShell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+```
+必要なライブラリを直接インストールします。
+
+```PowerShell
+pip install -r requirements.txt
 ```
 ※初回実行時、指定したWhisperのモデル（標準では base）が自動でダウンロードされます。
 
@@ -52,12 +75,13 @@ uv pip install -r requirements.txt
 
 ```text
 ├── README.md          # 本説明ファイル（Windows専用）
+├── pyproject.toml     # プロジェクトの設定ファイル（uv環境用）
 ├── requirements.txt   # ライブラリ一括インストール用ファイル
 ├── dictionary.txt     # 単語辞書（任意）
 ├── .venv/               # Python仮想環境フォルダ（uv venvにより自動生成されます）
 ├── src/
 │   └── main.py        # 本スクリプト本体
-└── temp/
+└── data/
     └── test.m4a       # 既定の音声ファイル（mp3, mp4等も可）
 ```
 
@@ -65,10 +89,16 @@ uv pip install -r requirements.txt
 
 ## 使い方
 
+ご利用の環境（uv、または通常の pip）に合わせて実行コマンドを使い分けてください。
 仮想環境がアクティベートされていることを確認し、プロジェクトのルートフォルダで実行してください。
+
 
 ### 1. 基本的な実行方法（デフォルト設定）
 `./data/test.m4a` に音声ファイルを配置している場合、引数なしで実行するだけで自動的に文字起こしが始まり、同じフォルダに test.srt が出力されます。
+```powershell
+uv run whisper-srt
+```
+もしくは
 ```powershell
 uv run src/main.py
 ```
@@ -84,16 +114,19 @@ python src/main.py
 
 #### 特定の音声ファイルを指定する場合
 ```powershell
+uv run whisper-srt ./data/audio.mp3
 python src/main.py ./data/audio.mp3
 ```
 
 #### 動画ファイルを指定して直接実行する場合
 ```powershell
+uv run whisper-srt ./data/input_movie.mp4
 python src/main.py ./data/input_movie.mp4
 ```
 
 #### 高精度モデル（smallやmedium）を指定して実行する場合
 ```powershell
+uv run whisper-srt ./data/test.m4a -m small
 python src/main.py ./temp/test.m4a -m small
 ```
 
@@ -105,6 +138,7 @@ tiny < base (デフォルト) < small < medium < large
 
 #### 別の単語辞書ファイルを指定する場合
 ```powershell
+uv run whisper-srt ./data/test.m4a -d my_dict.txt
 python src/main.py ./temp/test.m4a -d my_dict.txt
 ```
 
