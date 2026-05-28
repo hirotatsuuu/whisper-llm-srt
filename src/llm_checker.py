@@ -126,6 +126,10 @@ def refine_context_with_llm(segments: list, dictionary_terms: list, summary: str
                 for batch_seg in current_batch:
                     target_id = batch_seg["id"]
                     corrected_text = batch_seg["text"] # 万が一見つからなかった場合のフォールバック（現状維持）
+
+                    # テキスト修正前後の確認のため
+                    old_text = batch_seg["text"] # 修正前のテキストを保存
+                    new_text = old_text          # デフォルトは現状維持
                     
                     # AIの出力行から、該当するIDの行を探し出す
                     for line in llm_lines:
@@ -134,6 +138,10 @@ def refine_context_with_llm(segments: list, dictionary_terms: list, summary: str
                                 # 「TEXT:」より後ろの文字列を正解として抽出
                                 corrected_text = line.split("TEXT:", 1)[1].strip()
                                 break
+                    
+                    #  修正前後でテキストが変わっていた場合のみ出力
+                    if old_text != new_text:
+                        print(f"\n[修正検出 ID:{target_id}]", f"  BEFORE: {old_text}", f"  AFTER : {new_text}")
                                 
                     # タイムスタンプやIDなどの重要データはそのままに、テキストだけをAIの綺麗な文字に差し替える
                     batch_seg["text"] = corrected_text

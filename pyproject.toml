@@ -1,25 +1,32 @@
 [project]
-name = "whisper-srt"
+name = "whisper-llm-srt"
 version = "0.1.0"
-description = "動画または音声ファイルから10〜20文字に最適化されたプロ仕様のSRT字幕を出力するスクリプト"
+description = "Whisper × ローカルLLM(ELYZA) × BudouX による高精度・美レイアウト字幕生成ツール"
 readme = "README.md"
-requires-python = ">=3.12"
-
-# 必要なライブラリをここにすべて明記します
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "hirotatsuuu" }
+]
+# プロジェクトの実行に必要な外部ライブラリの定義
 dependencies = [
-    "openai-whisper",  # Whisper文字起こしAIの本体
-    "tqdm",            # 進捗状況を表示するプログレスバー
-    "budoux",          # Google製の日本語文節区切りライブラリ
+    "openai-whisper>=20240930", # 高精度音声認識（耳）
+    "ollama>=0.4.0",           # ローカルLLM制御（頭脳）
+    "budoux>=0.6.0",           # Google製の洗練された文節区切り（デザイナー）
+    "tqdm>=4.66.0",            # 処理の進行状況をターミナルにプログレスバーで可視化する
 ]
 
-# コマンドラインから一発起動するための設定（src/main.pyのmain関数を呼び出す）
 [project.scripts]
-whisper-srt = "src.main:main"
+# 💡 「uv run whisper-llm-srt」と叩いた時に、main.py の main() 関数を実行する定義
+whisper-llm-srt = "main:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-# Hatchlingにsrcフォルダをパッケージとして正しく認識させる設定
+[tool.hatch.metadata]
+# ソースコードの位置を正しく認識させるための設定
+allow-direct-references = true
+
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
