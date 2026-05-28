@@ -1,4 +1,4 @@
-# Whisper × ローカルLLM × BudouXSRT字幕生成スクリプト
+# Whisper×ELYZALLM×BudouXで高精度SRT字幕生成スクリプト
 
 OpenAIの文字起こしAI「Whisper」を使用し、動画編集（Premiere Pro、DaVinci Resolve等）のテロップ作成に最適化されたSRT字幕ファイルを自動生成するPythonスクリプトです。
 
