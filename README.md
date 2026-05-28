@@ -61,15 +61,6 @@ uv pip install -r requirements.txt
     └── test.m4a       # 既定の音声ファイル（mp3, mp4等も可）
 ```
 
-### 固有名詞の登録（dictionary.txt）
-認識率を上げたい固有の単語やYouTubeのチャンネル名などがある場合は、ルートフォルダに dictionary.txt を作成し、1行に1単語ずつ記述してください。
-
-##### 認識させたい固有の単語リスト（#で始まる行はコメントです）
-```
-おたつ
-ユーラシア大陸
-自転車世界一周
-```
 ---
 
 ## 使い方
@@ -115,6 +106,16 @@ tiny < base (デフォルト) < small < medium < large
 #### 別の単語辞書ファイルを指定する場合
 ```powershell
 python src/main.py ./temp/test.m4a -d my_dict.txt
+```
+
+### 固有名詞の登録（dictionary.txt）
+認識率を上げたい固有の単語やYouTubeのチャンネル名などがある場合は、ルートフォルダに dictionary.txt を作成し、1行に1単語ずつ記述してください。
+
+##### 認識させたい固有の単語リスト（#で始まる行はコメントです）
+```
+おたつ
+ユーラシア大陸
+自転車世界一周
 ```
 
 ---
