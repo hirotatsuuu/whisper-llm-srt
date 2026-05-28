@@ -16,7 +16,8 @@ env/
 .cache/
 
 # dataフォルダ
-data/
+/data/*
+!/data/dictionary.txt
 
 # 外部ツール（ffmpeg）やスクリプトが生成した動画・音声データ
 # ※誤って本番用動画や巨大な音声ファイルをGitHub等にアップロードするのを防ぎます
