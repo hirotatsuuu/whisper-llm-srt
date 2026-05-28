@@ -13,7 +13,7 @@ parser = budoux.load_default_japanese_parser()
 # =====================================================================
 # 初期設定エリア：変更したい場合はここを書き換えてください
 # =====================================================================
-DEFAULT_AUDIO_FILE = "./temp/test.m4a"   # 引数なしで実行した際に自動で読み込まれる既定のファイル
+DEFAULT_AUDIO_FILE = "./data/test.m4a"   # 引数なしで実行した際に自動で読み込まれる既定のファイル
 DEFAULT_DICT_FILE  = "dictionary.txt"    # 優先的に認識させたい固有名詞・専門用語を並べたテキストファイル
 DEFAULT_MODEL_SIZE = "base"             # 使用するWhisperのモデルサイズ（tiny/base/small/medium/large）
 

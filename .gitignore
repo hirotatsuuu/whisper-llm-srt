@@ -1,13 +1,14 @@
 # Python用
 __pycache__/
 *.pyc
+.env/
+.venv/
+env/
 venv/
 
 # OS用
 .DS_Store
 Thumbs.db
 
-# tempフォルダ用
-temp/*.m4a
-temp/*.mp4
-temp/*.srt
+# dataフォルダ用
+data/

@@ -25,34 +25,26 @@ winget install Gyan.FFmpeg
 ```
 ※インストール後、設定を反映させるために一度ターミナル（またはPC）を再起動してください。
 
-### 2. 仮想環境（env）の構築と有効化
-本プロジェクト専用の独立した仮想環境を構築します。プロジェクトのルートフォルダで以下のコマンドを実行してください。
+### 2. uv による仮想環境の構築とライブラリのインストール
+本プロジェクトでは、高速なパッケージ管理ツール uv を使用して環境を構築します。プロジェクトのルートフォルダ（whisper-srt）で以下のコマンドを実行してください。
 
-#### 1. 仮想環境（./env フォルダ）の作成
-```powershell
-python -m venv env
+1. 仮想環境（.venv フォルダ）の作成
+```PowerShell
+uv venv
 ```
-#### 2. 仮想環境のアクティベート（有効化）
-#### コマンドプロンプト(cmd)の場合:
-```powershell
-env\Scripts\activate.bat
+2. 仮想環境のアクティベート（有効化）
+```PowerShell
+.venv\Scripts\Activate.ps1
 ```
-#### PowerShellの場合:
-#### (スクリプト実行エラーが出る場合は事前に「Set-ExecutionPolicy RemoteSigned -Scope Process」を実行してください)
-```powershell
-.\env\Scripts\Activate.ps1
-```
-
 ※アクティベートに成功すると、ターミナルの先頭に (env) と表示されます。
+※スクリプト実行エラーが出る場合は、事前に `Set-ExecutionPolicy RemoteSigned -Scope Process` を実行してください。
 
-### 3. 依存ライブラリのインストール
+3. 依存ライブラリの一括インストール
 仮想環境がアクティベートされた状態で、requirements.txt を使って必要なライブラリを一括インストールします。
-```powershell
-pip install -r requirements.txt
+```PowerShell
+uv pip install -r requirements.txt
 ```
 ※初回実行時、指定したWhisperのモデル（標準では base）が自動でダウンロードされます。
-
----
 
 ## プロジェクトのディレクトリ構造
 
@@ -62,7 +54,7 @@ pip install -r requirements.txt
 ├── README.md          # 本説明ファイル（Windows専用）
 ├── requirements.txt   # ライブラリ一括インストール用ファイル
 ├── dictionary.txt     # 単語辞書（任意）
-├── env/               # Python仮想環境フォルダ（自動生成されます）
+├── .venv/               # Python仮想環境フォルダ（uv venvにより自動生成されます）
 ├── src/
 │   └── main.py        # 本スクリプト本体
 └── temp/
@@ -76,6 +68,7 @@ pip install -r requirements.txt
 ```
 おたつ
 ユーラシア大陸
+自転車世界一周
 ```
 ---
 
@@ -84,29 +77,40 @@ pip install -r requirements.txt
 仮想環境がアクティベートされていることを確認し、プロジェクトのルートフォルダで実行してください。
 
 ### 1. 基本的な実行方法（デフォルト設定）
-./temp/test.m4a に音声ファイルを配置している場合、引数なしで実行するだけで自動的に文字起こしが始まり、同じフォルダに test.srt が出力されます。
+./data/test.m4a に音声ファイルを配置している場合、引数なしで実行するだけで自動的に文字起こしが始まり、同じフォルダに test.srt が出力されます。
+```powershell
+uv run src/main.py
+```
+※`uv runの場合は仮想環境を実行しなくてもよい
+
+一般的なpythonコマンドによる実行（仮想環境をアクティブにしてください）
 ```powershell
 python src/main.py
 ```
+
 ### 2. 特定の音声・動画ファイルを指定して実行
 特定のファイルパスを指定したり、文字起こし精度を上げたい場合は、引数を使って実行できます。動画ファイルを指定した場合は、自動的に同フォルダ内に音声ファイル（.m4a）を抽出してから処理を行います。
 
 # 特定の音声ファイルを指定する場合
 ```powershell
-python src/main.py ./temp/audio.mp3
+python src/main.py ./data/audio.mp3
 ```
+
 # 動画ファイルを指定して直接実行する場合
 ```powershell
-python src/main.py ./temp/input_movie.mp4
+python src/main.py ./data/input_movie.mp4
 ```
+
 # 高精度モデル（smallやmedium）を指定して実行する場合
 ```powershell
 python src/main.py ./temp/test.m4a -m small
 ```
+
 # 別の単語辞書ファイルを指定する場合
 ```powershell
 python src/main.py ./temp/test.m4a -d my_dict.txt
 ```
+
 #### 指定可能なWhisperモデルサイズ
 右にいくほど精度が上がりますが、処理時間（PCのスペック）を要します。
 tiny < base (デフォルト) < small < medium < large
@@ -121,7 +125,7 @@ tiny < base (デフォルト) < small < medium < large
 # =====================================================================
 # 【初期設定エリア】変更したい場合はここを書き換えてください
 # =====================================================================
-DEFAULT_AUDIO_FILE = "./temp/test.m4a"   # 既定の音源ファイルパス
+DEFAULT_AUDIO_FILE = "./data/test.m4a"   # 既定の音源ファイルパス
 DEFAULT_DICT_FILE  = "dictionary.txt"    # 既定の単語辞書ファイル名
 DEFAULT_MODEL_SIZE = "base"             # 既定のWhisperモデルサイズ
 
