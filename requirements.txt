@@ -1,3 +1,16 @@
+# whisper-llm-srt 依存ライブラリ一覧
+
+# 音声認識AI (OpenAI Whisper)
 openai-whisper
+
+# ローカルLLM (Ollama公式Pythonクライアント)
+ollama
+
+# 日本語の美しい文節区切り (Google BudouX)
 budoux
+
+# ターミナル上の美しい進捗バー
 tqdm
+
+# Windows環境などでffmpegのパスが通らない場合の補助ライブラリ（環境に合わせて利用）
+# setuptools
