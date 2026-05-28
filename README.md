@@ -50,7 +50,9 @@ uv sync
 ├── pyproject.toml     # プロジェクトの設定・ライブラリ管理ファイル（uv用）
 ├── uv.lock            # 環境の完全同期用ロックファイル（手動編集不可・Git管理必須）
 ├── requirements.txt   # ライブラリ一括インストール用ファイル（pip用）
-├── .gitignore         # Git管理除外設定ファイル（.venvやメディアファイル等を割愛）
+├── .gitignore         # Git管理除外設定ファイル（.venvやメディアファイル等を除外）
+├── .gitattributes     # 改行コードの統一やバイナリ保護のためのGit属性設定ファイル
+├── .editorconfig      # エディタのコード規約設定ファイル（スペース数や文字コードの統一）
 ├── README.md          # 本説明ファイル
 ├── LICENSE            # ライセンス規約ファイル（MITライセンス等）
 ├── dictionary.txt     # 単語辞書（任意）
@@ -60,6 +62,7 @@ uv sync
 ├── docs/
 │   ├── uv_manual.md       # uvコマンドの解説・導入マニュアル
 │   ├── python_manual.md   # 通常の python / pip コマンドマニュアル
+│   ├── git_manual.md      # Git / GitHub の基本操作・ワークフローマニュアル
 │   └── troubleshooting.md # エラー・不具合発生時の対処マニュアル
 └── data/
     └── test.m4a       # 既定の音声ファイル（mp3, mp4等も可。※.gitignoreによりGit管理外）
@@ -108,6 +111,7 @@ tiny < base (デフォルト) < small < medium < large
 
 - **`docs/uv_manual.md`**: `uv` のインストール方法や、ライブラリの追加・削除など便利な応用コマンドの解説。
 - **`docs/python_manual.md`**: `uv` を使用せず、従来の `python` や `pip` コマンド、`requirements.txt` を使って動かしたい場合の手順。
+- **`docs/git_manual.md`**: 日常的なコミット・プッシュの流れや、間違えて動画を登録してしまった場合の対処法。
 - **`docs/troubleshooting.md`**: 「ffmpegが見つからない」「メモリ不足で強制終了する」など、エラーが起きたときの自己解決手順。
 
 ---
