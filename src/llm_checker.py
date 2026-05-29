@@ -1,4 +1,6 @@
-import ollama
+import ollama  # ローカルLLM実行エンジン「Ollama」と通信し、ELYZAなどの大規模言語モデルへ字幕修正指示を送るライブラリ
+import time  # 処理にかかった時間を「ミリ秒（小数点2桁）」単位まで精密に計測（time.perf_counter）し、パフォーマンスを評価するためのライブラリ
+
 
 # =====================================================================
 # 初期設定エリア：使用するローカルLLMモデルの定義
@@ -66,7 +68,11 @@ def refine_context_with_llm(segments: list, dictionary_terms: list, summary: str
     各セグメントのタイムスタンプ（ミリ秒のインデックス番号）を完全に維持したまま、
     日本語として不自然な聞き間違い、漢字の誤変換、固有名詞を超高精度にバッチ校正します。
     """
+
     print("[*] ローカルLLMによる文脈バッチ校正を開始します...")
+
+    # Whisper単体の処理時間計測開始
+    llm_start_time = time.perf_counter()
     
     refined_segments = []
     current_batch = []
@@ -113,6 +119,7 @@ def refine_context_with_llm(segments: list, dictionary_terms: list, summary: str
 """
 
             try:
+
                 # 最上部で定義した定数 LLM_MODEL_NAME を使用してOllamaで校正を実行
                 response = ollama.chat(
                     model=LLM_MODEL_NAME,
@@ -146,6 +153,8 @@ def refine_context_with_llm(segments: list, dictionary_terms: list, summary: str
                     # タイムスタンプやIDなどの重要データはそのままに、テキストだけをAIの綺麗な文字に差し替える
                     batch_seg["text"] = corrected_text
                     refined_segments.append(batch_seg)
+                
+                
                     
             except Exception as e:
                 # 【堅牢なエラーハンドリング】
@@ -157,6 +166,14 @@ def refine_context_with_llm(segments: list, dictionary_terms: list, summary: str
                     
             # 処理が終わったバッチを空にして、次のグループ（10件分）に備える
             current_batch = []
+
+        # LLM単体の処理時間計測終了
+        llm_end_time = time.perf_counter()
+
+        # LLM単体の経過時間（秒）
+        llm_elapsed_time = llm_end_time - llm_start_time
+
+        print(f"[*] LLM処理時間: {llm_elapsed_time:.2f} 秒")
             
     print("[+] ローカルLLMによる文脈校正がすべて完了しました。")
     return refined_segments

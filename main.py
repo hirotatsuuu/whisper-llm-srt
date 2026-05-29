@@ -88,7 +88,7 @@ def main():
     # 1. まず全体のあらすじを取得
     summary = generate_summary(cleaned_raw_segments)
 
-    # 生成されたあらすじを出力
+    # あらすじの内容を出力
     print("-" * 30)
     print("【生成されたあらすじ（ELYZAが学習した文脈）】")
     print(summary)
