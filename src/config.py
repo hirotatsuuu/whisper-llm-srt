@@ -17,7 +17,7 @@ LLM_MODEL_NAME  = "hf.co/mmnga/Llama-3-ELYZA-JP-8B-gguf"
 # LLMへのプロンプトテンプレートファイルのパス
 # ファイルの末尾に【補正対象データ】を自動で結合して使います。
 # ファイルが存在しない場合は、下記のDEFAULT_PROMPTにフォールバックします。
-LLM_PROMPT_FILE = "./data/llm_refine_prompt_template.txt"
+LLM_PROMPT_FILE = "./data/llm_prompt.txt"
 
 # --- 字幕レイアウト ---
 MIN_CHAR_LEN = 10  # 1行の最低文字数。これより短い場合は極力次の単語と結合させます
