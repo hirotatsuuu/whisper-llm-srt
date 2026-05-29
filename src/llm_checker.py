@@ -3,17 +3,8 @@ import ollama  # ローカルLLM実行エンジン「Ollama」と通信するた
 import time    # 処理時間を小数点2桁まで精密に計測するためのライブラリ
 from tqdm import tqdm  # tqdm.write を使って、進捗バーを破壊せずにログを出力するためのライブラリ
 
-
-# =====================================================================
-# 初期設定エリア：変更したい場合はここを書き換えてください
-# =====================================================================
-# 将来モデルを変更したい場合や、軽量モデル（gemma2:2bなど）を試したい場合はここを書き換えてください。
-LLM_MODEL_NAME = "hf.co/mmnga/Llama-3-ELYZA-JP-8B-gguf"
-
-# LLMへのプロンプトテンプレートファイルのパス
-# ファイルの末尾に【補正対象データ】を自動で結合して使います。
-# ファイルが存在しない場合は、下記のDEFAULT_PROMPTにフォールバックします。
-LLM_PROMPT_FILE = "./data/llm_refine_prompt_template.txt"
+# 設定ファイルからLLMの設定を参照する
+from src.config import LLM_MODEL_NAME, LLM_PROMPT_FILE
 
 # プロンプトファイルが見つからない場合のフォールバック用デフォルトプロンプト
 DEFAULT_PROMPT = """あなたは日本語字幕の校正専門家です。
@@ -83,7 +74,7 @@ def refine_context_with_llm(segments: list) -> list:
        formatter.py は seg["text"] をBudouXで文節分割してSRTに書き出します。
        words の生タイムスタンプは一切触らず、時間情報を保護します。
     """
-    tqdm.write("\n[*] ローカルLLMによる文脈バッチ校正を開始します...")
+    tqdm.write("[*] ローカルLLMによる文脈バッチ校正を開始します...")
 
     # プロンプトテンプレートを外部ファイルから読み込む
     # 【補正対象データ】は末尾に結合する形で使うため、ここではテンプレート部分だけを取得する
