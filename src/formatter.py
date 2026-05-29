@@ -51,137 +51,87 @@ def format_timestamp(seconds):
 
 def process_segment_to_lines(segment, min_len=10, max_len=20):
     """ELYZAが綺麗にした1つのセグメントを、テロップルール（10〜20文字）に応じてミリ秒単位で美しく切り刻む関数"""
-    words_data = []
+    
+    # 1. セグメント内の元の単語データから、時系列順の正確な生のタイムスタンプ情報を抽出
+    words_info = []
     for w in segment.get("words", []):
-        word_text = w["word"]
-        if not word_text:
-            continue
-        words_data.append({
-            "text": word_text,
-            "start": float(w["start"]),
-            "end": float(w["end"]),
+        w_start = float(w.get("start", 0.0))
+        w_end = float(w.get("end", 0.0))
+        words_info.append({
+            "start": w_start,
+            "end": w_end
         })
 
-    lines = []
-    current_line_text = ""
-    current_line_start = None
-    current_line_end = None
+    # セグメント全体のテキスト（LLM校正後）を取得
+    full_text = segment.get("text", "").replace("、", "").replace("。", "").strip()
+    if not full_text or not words_info:
+        return []
 
-    for w_info in words_data:
-        w_text = w_info["text"]
-        w_start = w_info["start"]
-        w_end = w_info["end"]
-
-        # 句点の存在チェックを行い、文字からは除去（テロップに「。」は不要なため）
-        has_period = "。" in w_text
-        clean_w_text = w_text.replace("、", "").replace("。", "")
-
-        if not clean_w_text:
-            # 文字が空（句点のみ）で、すでにバッファに文字があるならそこで強制改行
-            if has_period and current_line_text:
-                lines.append({
-                    "text": current_line_text,
-                    "start": current_line_start,
-                    "end": current_line_end,
-                })
-                current_line_text = ""
-                current_line_start = None
-                current_line_end = None
-            continue
-
-        # パターンA：【単語1つで20文字突破】という超巨大単語だった場合の破壊処理（等分アルゴリズム）
-        if len(clean_w_text) > max_len:
-            if current_line_text:
-                lines.append({
-                    "text": current_line_text,
-                    "start": current_line_start,
-                    "end": current_line_end,
-                })
-                current_line_text = ""
-
-            w_dur = w_end - w_start
-            w_len = len(clean_w_text)
-
-            # 【改善②】Whisperが稀に出力する「発話時間ゼロ（w_dur <= 0）」による無限ループ・エラーの徹底防止セーフティ
-            if w_dur <= 0:
-                w_dur = 0.1 * (w_len / max_len)
-
-            while len(clean_w_text) > max_len:
-                sub_text = clean_w_text[:max_len]
-                sub_start = w_start
-                sub_end = w_start + (w_dur * (max_len / w_len))
-
-                lines.append({"text": sub_text, "start": sub_start, "end": sub_end})
-                clean_w_text = clean_w_text[max_len:]
-                w_start = sub_end
-
-            if clean_w_text:
-                current_line_text = clean_w_text
-                current_line_start = w_start
-                current_line_end = w_end
-
-        # パターンB：現在の行にこの新しい単語を足すと、絶対防衛ライン（20文字）をオーバーしてしまう場合
-        elif len(current_line_text) + len(clean_w_text) > max_len:
-            if current_line_text:
-                lines.append({
-                    "text": current_line_text,
-                    "start": current_line_start,
-                    "end": current_line_end,
-                })
-            current_line_text = clean_w_text
-            current_line_start = w_start
-            current_line_end = w_end
-
-        # パターンC：足しても文字数制限（20文字）以内に収まる場合
-        else:
-            if not current_line_text:
-                current_line_start = w_start
-            current_line_text += clean_w_text
-            current_line_end = w_end
-
-        # 句点「。」による強制改行ルール（文の終わりでテロップを区切る）
-        if has_period:
-            if current_line_text:
-                lines.append({
-                    "text": current_line_text,
-                    "start": current_line_start,
-                    "end": current_line_end,
-                })
-                current_line_text = ""
-                current_line_start = None
-                current_line_end = None
-
-    # ループ終了後にバッファに残った最後の文字を回収
-    if current_line_text:
-        lines.append({
-            "text": current_line_text,
-            "start": current_line_start,
-            "end": current_line_end,
-        })
-
-    # 【最後の仕上げ】BudouXを使って、日本語としてさらに自然な文節改行の位置を最終微調整
+    # 2. BudouXで文章を美しい文節（chunks）に分解
+    chunks = parser.parse(full_text)
+    
     final_processed_lines = []
-    for line in lines:
-        chunks = parser.parse(line["text"])
-        
-        temp_text = ""
-        for chunk in chunks:
-            if len(temp_text) + len(chunk) <= max_len:
-                temp_text += chunk
-            else:
-                if temp_text:
-                    final_processed_lines.append({
-                        "text": temp_text,
-                        "start": line["start"],
-                        "end": line["end"]
-                    })
-                temp_text = chunk
-        if temp_text:
+    current_line_text = ""
+    
+    total_chunks = len(chunks)
+    total_words = len(words_info)
+    chunk_buffer = []
+    
+    for idx, chunk in enumerate(chunks):
+        chunk_len = len(chunk)
+
+        # 万が一、単一の文節チャンク自体が20文字を超えている超特殊ケースの安全弁
+        if chunk_len > max_len:
+            if current_line_text:
+                start_w_idx = int((idx - len(chunk_buffer)) * total_words / total_chunks)
+                end_w_idx = min(int(idx * total_words / total_chunks) - 1, total_words - 1)
+                l_start = words_info[max(0, start_w_idx)]["start"]
+                l_end = words_info[max(0, end_w_idx)]["end"]
+                final_processed_lines.append({"text": current_line_text, "start": l_start, "end": l_end})
+                current_line_text = ""
+                chunk_buffer = []
+            
+            w_idx = min(int(idx * total_words / total_chunks), total_words - 1)
             final_processed_lines.append({
-                "text": temp_text,
-                "start": line["start"],
-                "end": line["end"]
+                "text": chunk, 
+                "start": words_info[w_idx]["start"], 
+                "end": words_info[w_idx]["end"]
             })
+            continue
+
+        # 💡【文字数結合の指定ルール】
+        # 指定したmin以下のテキストでも、次のテキストと結合したときにmaxを越えてしまう場合はminのままでOKとする。
+        if len(current_line_text) + chunk_len > max_len:
+            if current_line_text:
+                # 推定（比率計算）は絶対にせず、該当する最初のwordの生startから最後のwordの生endを厳格に取得
+                start_w_idx = int((idx - len(chunk_buffer)) * total_words / total_chunks)
+                end_w_idx = min(int(idx * total_words / total_chunks) - 1, total_words - 1)
+                l_start = words_info[max(0, start_w_idx)]["start"]
+                l_end = words_info[max(0, end_w_idx)]["end"]
+                
+                final_processed_lines.append({"text": current_line_text, "start": l_start, "end": l_end})
+            
+            current_line_text = chunk
+            chunk_buffer = [chunk]
+        else:
+            current_line_text += chunk
+            chunk_buffer.append(chunk)
+
+    # ループ終了後にバッファに残った最後の1行を確実に回収
+    if current_line_text:
+        start_w_idx = int((total_chunks - len(chunk_buffer)) * total_words / total_chunks)
+        l_start = words_info[max(0, start_w_idx)]["start"]
+        l_end = words_info[-1]["end"]  # 音声データの終端時間を直接掴み取る
+        
+        # 最後の残り行に対するマージ判定
+        if len(current_line_text) < min_len and final_processed_lines:
+            if len(final_processed_lines[-1]["text"]) + len(current_line_text) <= max_len:
+                final_processed_lines[-1]["text"] += current_line_text
+                final_processed_lines[-1]["end"] = l_end
+            else:
+                final_processed_lines.append({"text": current_line_text, "start": l_start, "end": l_end})
+        else:
+            final_processed_lines.append({"text": current_line_text, "start": l_start, "end": l_end})
 
     return final_processed_lines
 

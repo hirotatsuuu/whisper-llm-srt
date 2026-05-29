@@ -46,6 +46,8 @@ def main():
     parser.add_argument("-d", "--dict",   default=DEFAULT_DICT_FILE,   help="優先単語リスト（dictionary.txt）のパス")
     parser.add_argument("-f", "--filler", default=DEFAULT_FILLER_FILE, help="フィラーリスト（filler.txt）のパス")
     parser.add_argument("-m", "--model",  default=DEFAULT_MODEL_SIZE,  help="Whisperのモデルサイズ指定")
+    # 💡【追加機能】LLM校正をスキップするための引数。--no-llm をつけて実行するとLLMを通さずに書き出します
+    parser.add_argument("--no-llm", action="store_true", help="LLMによる文脈校正工程をスキップする")
 
     args = parser.parse_args()
 
@@ -56,6 +58,7 @@ def main():
 
     # 総処理時間の計測を開始
     start_time = time.perf_counter()
+    print("[*] whisper-llm-srtプロジェクトを起動しました")
 
     # 入力ファイルの拡張子を解析して動画か音声かを判別する準備
     base_path, ext = os.path.splitext(args.input_file)
@@ -88,7 +91,7 @@ def main():
     # - 前後の文字・説明文字（{desc}）をフォーマットから完全に除去しました。
     # - 進捗バーは一切の文字を排し、純粋なバーと進捗情報のみで一行を構成します。
     # -----------------------------------------------------------------
-    custom_format = "[*] {percentage:3.0f}% |{bar:20}| {n_fmt}/{total_fmt} [{elapsed}]"
+    custom_format = "{percentage:3.0f}% |{bar:20}| {n_fmt}/{total_fmt} [{elapsed}]"
 
     with tqdm(
         total=len(PIPELINE_STEPS), 
@@ -101,6 +104,7 @@ def main():
         word_dict   = load_word_dictionary(args.dict)
         filler_list = load_filler_list(args.filler)
         pbar.update(1)
+        pbar.refresh()  # 💡【進捗バー表示の修正】描画を強制更新して20%を確実に表示
 
         # 【工程 2】OpenAI Whisperによる超高精度な音声解析と文字起こし
         raw_segments, whisper_elapsed = run_whisper_transcribe(
@@ -111,6 +115,7 @@ def main():
         # 💡【タイミング修正】音声の解析が終わったタイミングで、改行を挟んで即座に出力します。
         tqdm.write(f"[*] Whisper処理時間: {whisper_elapsed:.2f} 秒")
         pbar.update(1)
+        pbar.refresh()  # 💡【進捗バー表示の修正】40%を表示
 
         # 最低限のデータが取れているか安全チェック
         if not raw_segments:
@@ -120,34 +125,49 @@ def main():
         # 【工程 3】フィラー（えっと・あの等）をタイムスタンプを維持したまま空文字に置換
         cleaned_segments = clean_fillers_keep_timing(raw_segments, filler_list)
         pbar.update(1)
+        pbar.refresh()  # 💡【進捗バー表示の修正】描画を強制更新して60%を確実に表示
 
         # 💡【追加機能】LLMが書き換える前の「フィラー除去済み生データ」をディープコピーして別変数に完全退避
         whisper_only_segments = copy.deepcopy(cleaned_segments)
 
-        # 💡【タイミング修正】工程4のLLM処理が始まる直前で、新しく正確に計測（計測開始）
-        llm_start_time = time.perf_counter()
-
         # 【工程 4】LLMが前後の文脈をもとにバッチ校正
-        # ※ あらすじ・辞書は渡しません。前後TEXTの文脈のみで自然な日本語に補正させます。
-        llm_refined_segments = refine_context_with_llm(cleaned_segments)
-        
-        # 💡【タイミング修正】LLMのバッチ校正が完了した直後のタイミングで計測を完了し、改行を挟んで出力します。
-        llm_elapsed_time = time.perf_counter() - llm_start_time
-        tqdm.write(f"\n[*] LLM処理時間: {llm_elapsed_time:.2f} 秒")
+        if args.no_llm:
+            tqdm.write("[*] オプション検出: --no-llm が指定されたため、LLM校正工程をスキップします。")
+            # LLMをスキップする場合は、フィラー除去済み生データをそのまま通常版のデータとする
+            llm_refined_segments = copy.deepcopy(whisper_only_segments)
+        else:
+            # 💡【タイミング修正】工程4のLLM処理が始まる直前で、新しく正確に計測（計測開始）
+            llm_start_time = time.perf_counter()
+
+            # ※ あらすじ・辞書は渡しません。前後TEXTの文脈のみで自然な日本語に補正させます。
+            llm_refined_segments = refine_context_with_llm(cleaned_segments)
+            
+            # 💡【タイミング修正】LLMのバッチ校正が完了した直後のタイミングで計測を完了し、改行を挟んで出力します。
+            llm_elapsed_time = time.perf_counter() - llm_start_time
+            tqdm.write(f"[*] LLM処理時間: {llm_elapsed_time:.2f} 秒")
+
         pbar.update(1)
+        pbar.refresh()  # 💡【進捗バー表示の修正】80%を表示
 
         # 【工程 5】BudouXによる10〜20文字カット ＋ SRTファイルへの書き出し
-        
-        # 通常版（LLM校正後）の出力
-        tqdm.write("[*] デザイナー工程: 校正後の通常字幕を出力中...")
-        success_normal = write_srt_file(llm_refined_segments, output_srt_path)
-        
-        # 【追加機能】Whisper限定版（校正前）の出力
-        tqdm.write("[*] デザイナー工程: 校正前のWhisper字幕を出力中...")
-        success_whisper = write_srt_file(whisper_only_segments, output_whisper_srt_path)
+        if args.no_llm:
+            # 💡【修正】--no-llm 指定時は、通常版の出力パスに生データ字幕のみを出力します
+            tqdm.write("[*] デザイナー工程: 通常字幕を出力中...")
+            success_normal = write_srt_file(llm_refined_segments, output_srt_path)
+
+            success_whisper = True  # スキップのためTrue扱い（successの論理積を崩さないため）
+        else:
+            # 通常版（LLM校正後、またはLLMスキップ時）の出力
+            tqdm.write("[*] デザイナー工程: 通常字幕を出力中...")
+            success_normal = write_srt_file(llm_refined_segments, output_srt_path)
+            
+            # 【追加機能】Whisper限定版（校正前）の出力
+            tqdm.write("[*] デザイナー工程: 校正前のWhisper字幕を出力中...")
+            success_whisper = write_srt_file(whisper_only_segments, output_whisper_srt_path)
         
         success = success_normal and success_whisper
         pbar.update(1)
+        pbar.refresh()  # 💡【進捗バー表示の修正】100%を表示
 
     # -----------------------------------------------------------------
     # 【後始末クリーンアップ】
@@ -165,10 +185,14 @@ def main():
         sys.exit(1)
 
     # 画面に成果物のパスと、かかった総処理時間をわかりやすく表示
-    print(f"[+] 通常版の字幕ファイル: {output_srt_path}")
-    print(f"[+] 校正前の字幕ファイル: {output_whisper_srt_path}")
-    print(f"[*] 総処理時間: {time.perf_counter() - start_time:.2f} 秒")
-
+    if args.no_llm:
+        # 💡【修正】--no-llm 指定時は通常版のパスのみを表示します
+        print(f"[+] 【通常版】字幕ファイル: {output_whisper_srt_path}")
+        print(f"[*] 総処理時間: {time.perf_counter() - start_time:.2f} 秒")
+    else:
+        print(f"[+] 【通常版】字幕ファイル: {output_srt_path}")
+        print(f"[+] 【校正前】字幕ファイル: {output_whisper_srt_path}")
+        print(f"[*] 総処理時間: {time.perf_counter() - start_time:.2f} 秒")
 
 if __name__ == "__main__":
     main()

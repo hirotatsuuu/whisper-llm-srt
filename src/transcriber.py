@@ -127,7 +127,7 @@ def run_whisper_transcribe(audio_path, word_dict, model_size="base"):
     if word_dict:
         prompt_string = "。" + "、".join(word_dict) + "。"
 
-    print(f"[*] モデル '{model_size}' をパソコンのメモリに読み込み中...")
+    print(f"\n[*] モデル '{model_size}' をパソコンのメモリに読み込み中...")
     try:
         model = load_model(model_size)
     except MemoryError:
