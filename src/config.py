@@ -19,6 +19,9 @@ LLM_MODEL_NAME  = "hf.co/mmnga/Llama-3-ELYZA-JP-8B-gguf"
 # ファイルが存在しない場合は、下記のDEFAULT_PROMPTにフォールバックします。
 LLM_PROMPT_FILE = "./data/llm_prompt.txt"
 
+# LLMへのバッチ処理の変数
+BATCH_SIZE_LLM = 10
+
 # --- 字幕レイアウト ---
 MIN_CHAR_LEN = 10  # 1行の最低文字数。これより短い場合は極力次の単語と結合させます
 MAX_CHAR_LEN = 20  # 1行の最大文字数。YouTubeやTikTokのテロップとして最も見やすい20文字を絶対上限とします

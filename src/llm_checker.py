@@ -1,25 +1,19 @@
 import os      # プロンプトファイルのパス確認・読み込みに使うライブラリ
+import sys     # プロンプト不在時にエラー終了させるためのライブラリ
 import ollama  # ローカルLLM実行エンジン「Ollama」と通信するためのライブラリ
 import time    # 処理時間を小数点2桁まで精密に計測するためのライブラリ
 from tqdm import tqdm  # tqdm.write を使って、進捗バーを破壊せずにログを出力するためのライブラリ
 
 # 設定ファイルからLLMの設定を参照する
-from src.config import LLM_MODEL_NAME, LLM_PROMPT_FILE
+from src.config import LLM_MODEL_NAME, LLM_PROMPT_FILE, BATCH_SIZE_LLM
 
-# プロンプトファイルが見つからない場合のフォールバック用デフォルトプロンプト
-DEFAULT_PROMPT = """
-あなたは日本語字幕の校正専門家です。
-【補正対象データ】の文脈を読み、文字の「誤変換」のみを自然な日本語に修正してください。
-
-【厳守ルール】
-1. 途中のIDを絶対に省略・削除せず、すべてのIDをそのまま出力すること。
-2. 元の文章を勝手に要約したり、別の表現に言い換えたりしないこと。
-3. TEXTが空欄のIDは、そのまま空欄（TEXT: ）で返すこと。
-4. 挨拶や解説は一切出力せず、指定フォーマットのみを返すこと。
-
+# 出力フォーマットの末尾に「【補正対象データ】」の見出しまで含めて定義
+OUTPUT_FORMAT_PROMPT = """
 【出力フォーマット】（このフォーマットを厳守してください）
 ID: 番号 | TEXT: 校正後のテキスト
 ID: 番号 | TEXT: 校正後のテキスト
+
+【補正対象データ】
 """
 # =====================================================================
 
@@ -27,28 +21,28 @@ ID: 番号 | TEXT: 校正後のテキスト
 def load_prompt_template(file_path):
     """外部テキストファイルからプロンプトテンプレートを読み込む関数。
 
-    ファイルが存在しない場合はDEFAULT_PROMPTにフォールバックします。
-    【補正対象データ】の結合はこの関数では行わず、呼び出し元で行います。
+    ファイルが存在しない、または空の場合はフォールバックせず、
+    エラーを出力してプログラムを完全に終了（明示的な例外を発生）させます。
     """
     if not file_path or not os.path.exists(file_path):
-        tqdm.write(f"[*] 注意: プロンプトファイルが見つかりません: {file_path} (デフォルトプロンプトで続行します)")
-        return DEFAULT_PROMPT
+        tqdm.write(f"\n[❌ 致命的エラー] プロンプトファイルが見つかりません: {file_path}")
+        raise FileNotFoundError(f"必須のプロンプトファイルが存在しません: {file_path}")
 
     try:
         with open(file_path, "r", encoding="utf-8-sig") as f:
             template = f.read().strip()
 
         if not template:
-            tqdm.write(f"[*] 注意: プロンプトファイルが空です（デフォルトプロンプトで続行します）")
-            return DEFAULT_PROMPT
+            tqdm.write(f"\n[❌ 致命的エラー] プロンプトファイルが空です: {file_path}")
+            raise ValueError(f"プロンプトファイルの内容が空です: {file_path}")
 
         prompt_filename = os.path.basename(file_path)
         tqdm.write(f"[*] プロンプトテンプレート [{prompt_filename}] を読み込みました")
         return template
 
     except Exception as e:
-        tqdm.write(f"[*] 警告: プロンプトファイルの読み込み中にエラーが発生しました（デフォルトプロンプトで続行します）: {e}")
-        return DEFAULT_PROMPT
+        tqdm.write(f"\n[❌ 致命的エラー] プロンプトファイルの読み込み中に予期せぬエラーが発生しました: {e}")
+        raise e
 
 
 def refine_context_with_llm(segments: list) -> list:
@@ -61,13 +55,21 @@ def refine_context_with_llm(segments: list) -> list:
        formatter.py は seg["text"] をBudouXで文節分割してSRTに書き出します。
        words の生タイムスタンプは一切触らず、時間情報を保護します。
     """
-    tqdm.write("[*] ローカルLLMによる文脈バッチ校正を開始します...")
+    tqdm.write(f"[*] ローカルLLMによる文脈バッチ校正を開始します... (設定バッチ数: {BATCH_SIZE_LLM})")
 
-    # プロンプトテンプレートを外部ファイルから読み込む
-    # 【補正対象データ】は末尾に結合する形で使うため、ここではテンプレート部分だけを取得する
+    # プロンプトテンプレートを外部ファイルから読み込む（失敗時はここでプログラムが終了します）
     prompt_template = load_prompt_template(LLM_PROMPT_FILE)
 
+    # 見出しまで含めたフォーマットとベーステンプレートを、最初のほうで一元的に結合
+    base_prompt_ready = prompt_template + "\n" + OUTPUT_FORMAT_PROMPT
+
     llm_start_time = time.perf_counter()  # LLM全体の処理時間計測開始（ループの外で1回だけ）
+
+    # 設定値が 0 以下の異常値の時、無限ループや空バッチ送信を完璧に防ぐ安全ガード
+    current_batch_size_limit = BATCH_SIZE_LLM
+    if current_batch_size_limit <= 0:
+        tqdm.write(f"\n[⚠ 設定エラー] BATCH_SIZE_LLM が {BATCH_SIZE_LLM} に設定されています。安全のため最小値の '1' (逐次処理) として処理します。")
+        current_batch_size_limit = 1
 
     refined_segments = []
     current_batch = []
@@ -75,9 +77,9 @@ def refine_context_with_llm(segments: list) -> list:
     for index, seg in enumerate(segments):
         current_batch.append(seg)
 
-        # 句読点（。、）があるか、10件溜まったか、最後の要素ならバッチ処理を実行
+        # 句読点（。、）があるか、指定件数溜まったか、最後の要素ならバッチ処理を実行
         has_punctuation = "。" in seg["text"] or "、" in seg["text"]
-        is_batch_full = len(current_batch) >= 10 or index == len(segments) - 1
+        is_batch_full = len(current_batch) >= current_batch_size_limit or index == len(segments) - 1
 
         if has_punctuation or is_batch_full:
 
@@ -86,8 +88,8 @@ def refine_context_with_llm(segments: list) -> list:
             for batch_seg in current_batch:
                 batch_prompt_text += f"ID: {batch_seg['id']} | TEXT: {batch_seg['text']}\n"
 
-            # テンプレートの末尾に【補正対象データ】を結合して完全なプロンプトを組み立てる
-            prompt = prompt_template + "\n\n【補正対象データ】\n" + batch_prompt_text
+            # ループ内では、事前に組み立てたベースの末尾にテキストを足すだけの最速処理
+            prompt = base_prompt_ready + batch_prompt_text
 
             try:
                 # Ollama APIを呼び出してローカルLLM（ELYZA等）を実行
@@ -127,16 +129,35 @@ def refine_context_with_llm(segments: list) -> list:
 
                     # タイムスタンプが正常な場合のみLLMの校正結果を反映する
                     if is_timestamp_valid:
+                        # 💡【バグ修正】LLMが途中で改行を入れて複数行で返してきた場合でも、すべて結合して回収するロジック
+                        found_target = False
+                        collected_lines = []
+
                         for line in llm_lines:
+                            # ターゲットとなるIDの開始行を見つける
                             if f"ID: {target_id} " in line or f"ID:{target_id}" in line:
+                                found_target = True
                                 if "TEXT:" in line:
-                                    parsed_text = line.split("TEXT:", 1)[1].strip()
-                                    # LLMが誤って空文字を返してきた場合は元のテキストを維持するガード
-                                    if parsed_text == "" and old_text != "":
-                                        corrected_text = old_text
-                                    else:
-                                        corrected_text = parsed_text
+                                    # TEXT: の後ろの部分を抽出
+                                    collected_lines.append(line.split("TEXT:", 1)[1].strip())
+                                continue
+                            
+                            # ターゲットの回収中に、別の「ID:」行が出現したら回収を終了する
+                            if found_target:
+                                if "ID: " in line or "ID:" in line:
                                     break
+                                # 別のIDでなければ、LLMが勝手に入れた改行とみなしてテキストを追記
+                                collected_lines.append(line.strip())
+
+                        if found_target:
+                            # 複数行に分かれていたテキストを1つに結合（スペースを挟まずに結合）
+                            parsed_text = "".join(collected_lines).strip()
+                            
+                            # LLMが誤って空文字を返してきた場合は元のテキストを維持するガード
+                            if parsed_text == "" and old_text != "":
+                                corrected_text = old_text
+                            else:
+                                corrected_text = parsed_text
 
                         # 修正が行われた場合のみ差分をログ出力
                         if old_text != corrected_text:
