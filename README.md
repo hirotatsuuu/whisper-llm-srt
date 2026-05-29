@@ -1,6 +1,6 @@
 # Whisper×ELYZA×BudouXでSRT字幕生成スクリプト
 
-OpenAIの文字起こしAI「Whisper」を使用し、動画編集（Premiere Pro、DaVinci Resolve等）のテロップ作成に最適化されたSRT字幕ファイルを自動生成するPythonスクリプトです。
+OpenAIの文字起こしAI「Whisper」を使用し、動画編集（Shotcut、DaVinci Resolve等）のテロップ作成に最適化されたSRT字幕ファイルを自動生成するPythonスクリプトです。
 
 ## 主な特徴
 
@@ -8,7 +8,7 @@ OpenAIの文字起こしAI「Whisper」を使用し、動画編集（Premiere Pr
 - **ミリ秒単位の完全シンクロ**: 等分（割り算）による時間配分を廃止し、実際の発話タイミング（ミリ秒）に合わせて字幕の表示時間を自動伸縮します。
 - **タイムスタンプ維持型フィラー除去**: LLMに渡す前の段階で、「えっと」「あのー」といった言葉のヒゲ（フィラー）の時間データ（箱）は残したまま「空文字」に置換。音ズレを100%発生させずにノイズをカットします。除去する語は `filler.txt` で自由にカスタマイズできます。
 - **文脈ベースのAI校正**: ローカルLLM（ELYZA）が各セグメントの前後の流れを読み取り、音声認識特有の同音異義語ミスや漢字の誤変換を自動補正します。あらすじや辞書は渡さず、前後テキストの文脈のみを手がかりとすることで、誤誘導のない高精度な補正を実現しています。
-- **テロップ向けの文字数絶対厳守**: 1行の文字数を10〜20文字の間に自動調整。20文字を絶対に超えないよう自動で安全に分割します。
+- **テロップ向けの文字数絶対厳守**: 1行の文字数を指定文字数間に自動調整。可能な限り指定文字数を超えないよう自動で安全に分割します。
 - **自然な文節区切り**: Googleの文節区切りライブラリ「BudouX」を搭載。単語の途中で不自然にぶつ切りされるのを防ぎます。
 - **クレンジング機能**: 画面テロップで邪魔になりやすい句読点（「、」や「。」）を自動で除去。ただし「。」や「、」が来た場合はそこで文脈の区切りと判断し、スマートにLLMへバッチ送信します。
 - **動画ファイルに直接対応**: 動画（.mp4等）を指定すると、自動で同名の音声（.m4a）を切り出してから文字起こしを行います。
@@ -23,19 +23,30 @@ OpenAIの文字起こしAI「Whisper」を使用し、動画編集（Premiere Pr
 
 ### 1. 外部ツール（ffmpeg / Ollama）のインストール
 
-動画から音声を抽出したり、音声フォーマットを変換するために ffmpeg と ffprobe が必須です。また、文脈校正を行うために Ollama が必要です。Windowsの標準機能（winget）を使い、ターミナル（PowerShell等）で以下を実行してインストールしてください。
+Windowsの標準機能（winget）を使い、ターミナル（PowerShell等）で以下を実行してインストールしてください。
+
+動画から音声を抽出したり、音声フォーマットを変換するために ffmpeg が必須です。
 
 ```powershell
 winget install Gyan.FFmpeg
+ffmpeg -version
 ```
 
+また、文脈校正を行うために Ollama が必要です。
+
 ```powershell
-winget install Ollama.Ollama # 1.98GBある
+winget install Ollama.Ollama
 ollama --version
 ```
 
+Ollama起動後、使用するモデル（ELYZA）をあらかじめダウンロードしておいてください。
+※容量が大きいので時間が掛かります。
+
+```powershell
+`ollama pull hf.co/mmnga/Llama-3-ELYZA-JP-8B-gguf` 
+```
+
 ※インストール後、設定を反映させるために一度ターミナル（またはPC）を再起動してください。
-※Ollama起動後、ターミナルで `ollama pull hf.co/mmnga/Llama-3-ELYZA-JP-8B-gguf` を実行し、使用するモデル（ELYZA）をあらかじめダウンロードしておいてください。
 
 ### 2. 環境構築とライブラリの同期
 
@@ -65,7 +76,9 @@ uv sync
 
 ```text
 ├── src/
-│   ├── __init__.py
+│   ├── __init__.py     #  Pythonプロジェクトのデフォルト
+│   ├── config.py       #  初期値など後から変更可能な設定ファイル
+│   ├── pipeline.py     #  main.pyから実行されるスクリプト
 │   ├── transcriber.py  # 【第1工程：耳】音声認識、辞書・フィラー読み込み、フィラー空文字化
 │   ├── llm_checker.py  # 【第2工程：頭脳】前後の文脈をもとにしたバッチ校正（ELYZA）
 │   └── formatter.py    # 【第3工程：デザイナー】BudouXによる10〜20文字カット、SRT出力
@@ -75,10 +88,12 @@ uv sync
 │   ├── git_manual.md       # Git / GitHub の基本操作・ワークフローマニュアル
 │   └── troubleshooting.md  # エラー・不具合発生時の対処マニュアル
 ├── data/               # 各種データ（※.gitignoreにより、大容量メディアはGit管理外）
+│   ├── sample/         # dataフォルダに格納するサンプルデータ      
 │   ├── dictionary.txt  # 固有名詞・専門用語辞書（任意）
 │   ├── filler.txt      # 除去したいフィラー語リスト（任意）
+│   ├── llm_refine_prompt_template.txt  # LLMへのプロンプト 
 │   └── test.m4a        # 既定の音声ファイル（mp3, mp4等も可）
-├── main.py             # 【司令塔】全体を統括し一本道で処理を回すメインスクリプト
+├── main.py             # 全体を統括し一本道で処理を回すメインスクリプト
 ├── pyproject.toml      # プロジェクトの設定・ライブラリ管理ファイル（uv用）
 ├── uv.lock             # 環境の完全同期用ロックファイル（手動編集不可・Git管理必須）
 ├── requirements.txt    # ライブラリ一括インストール用ファイル（pip用）
@@ -97,7 +112,7 @@ uv sync
 
 ### 1. 基本的な実行方法（デフォルト設定）
 
-`./data/test.m4a` に音声ファイルを配置している場合、引数なしで実行するだけで自動的に文字起こしが始まり、同じフォルダに `test.srt` が出力されます。
+`./data/test.m4a` に音声ファイルを配置している場合、引数なしで実行するだけで自動的に文字起こしが始まり、同じフォルダに `test.srt`と`test_whisper.srt` が出力されます。
 
 ```powershell
 uv run whisper-llm-srt
@@ -122,6 +137,9 @@ uv run whisper-llm-srt ./data/test.m4a -d ./data/my_dict.txt
 
 # 別のフィラーリストを指定
 uv run whisper-llm-srt ./data/test.m4a -f ./data/my_filler.txt
+
+# LLMを使用せずWhisperのみで実行
+uv run whisper-llm-srt --no-llm
 ```
 
 ##### 指定可能なWhisperモデルサイズ
@@ -142,6 +160,7 @@ tiny < base (デフォルト) < small < medium < large
 - **`docs/python_manual.md`**: `uv` を使用せず、従来の `python` や `pip` コマンド、`requirements.txt` を使って動かしたい場合の手順。
 - **`docs/git_manual.md`**: 日常的なコミット・プッシュの流れや、間違えて動画を登録してしまった場合の対処法。
 - **`docs/troubleshooting.md`**: 「ffmpegが見つからない」「メモリ不足で強制終了する」など、エラーが起きたときの自己解決手順。
+- **`docs/ai_manual.md`**: 使用している3種類のAIモデルの簡単な説明。
 
 ---
 
@@ -165,31 +184,65 @@ tiny < base (デフォルト) < small < medium < large
 なんか
 ```
 
+## LLMへ送るプロンプトの登録（llm_refine_prompt_template.txt）
+
+LLMへの指示書としてのプロンプトを記入する。この文章によって字幕の精度が大きく変わる。
+
+```text
+あなたは日本語字幕の校正専門家です。
+以下の【補正対象データ】は、音声認識AIが出力した日本語テキストです。
+このデータの一番の絶対情報は「音（発音・響き）」であり、もともとのテキストが正しいことが大半です。
+
+しかし、音声認識の特性上、稀に「同音異義語の誤変換」「漢字ミス」「音が近い言葉への聞き違い」によって変な文章になっている箇所があります。
+各IDのTEXTを前後の文脈から読み取り、元の「音（発音）」を決して崩さない範囲で、日本語として最も自然な表現に書き直してください。
+
+【最重要の補正ルール】
+1. 音（発音）の維持【絶対厳守】
+   元のテキストの「音（発音・響き）」から離れた言い換えや単語変更は一切NGです。
+   修正する場合は、必ず「音が極めて近くて、前後の文脈に当てはまる正しい言葉」を推測して当てはめてください。
+   （NG例：「難しい」を「しにくい」や「困難」に変えるのは絶対NG）
+
+2. 勝手な文章削除の禁止【絶対厳守】
+   変な表現でも、テキストを勝手に削除・省略することは絶対NGです。必ず元の音の長さに合わせて出力してください。
+
+3. 基本は現状維持（過剰修正の禁止）
+   一般的な会話として通じる部分は変更しないでください。明確に不自然な箇所のみ対象とします。
+
+4. 空欄の維持
+   TEXTが空欄（フィラー除去済み）のIDは、必ずそのまま空欄で返してください。
+
+5. 出力の純粋性
+   解説・前置き・後置きは一切不要です。指定フォーマットのみ出力してください。
+
+【出力フォーマット】（このフォーマットを厳守してください）
+ID: 番号 | TEXT: 校正後のテキスト
+```
+
 ---
 
 ## スクリプト内の設定変更
 
-既定のファイル名やモデルを変えたい場合は、`main.py` 上部の【初期設定エリア】を直接書き換えてください。
+既定のファイル名やモデルを変えたい場合は、`src/config.py` を直接書き換えてください。
 
 ```python
-# =====================================================================
-# 初期設定エリア：変更したい場合はここを書き換えてください
-# =====================================================================
-DEFAULT_AUDIO_FILE  = "./data/test.m4a"        # 引数なしで実行した際に自動で読み込まれる既定のファイル
-DEFAULT_DICT_FILE   = "./data/dictionary.txt"  # 優先的に認識させたい固有名詞・専門用語のテキストファイル
-DEFAULT_FILLER_FILE = "./data/filler.txt"      # 除去したいフィラー語（「えっと」「あのー」等）のテキストファイル
-DEFAULT_MODEL_SIZE  = "base"                   # 使用するWhisperのモデルサイズ（tiny/base/small/medium/large）
+DEFAULT_AUDIO_FILE  = "./data/test.m4a" 
+DEFAULT_DICT_FILE   = "./data/dictionary.txt"
+DEFAULT_FILLER_FILE = "./data/filler.txt"
 
-# 動画ファイルから音声（.m4a）を一時抽出した際、処理終了後に削除するか（True = 自動削除 / False = 残す）
+# --- Whisper ---
+DEFAULT_MODEL_SIZE  = "base" # （tiny/base/small/medium/large）
+
+# --- LLM ---
+LLM_MODEL_NAME  = "hf.co/mmnga/Llama-3-ELYZA-JP-8B-gguf"
+LLM_PROMPT_FILE = "./data/llm_refine_prompt_template.txt"
+
+# --- 字幕レイアウト ---
+MIN_CHAR_LEN = 10  
+MAX_CHAR_LEN = 20  
+
+# --- 動作設定 ---
 REMOVE_TEMP_AUDIO = False
-# =====================================================================
-```
-
-字幕の文字数制限を変えたい場合は、`src/formatter.py` の冒頭を書き換えてください。
-
-```python
-MIN_CHAR_LEN = 10  # 1行の最低文字数
-MAX_CHAR_LEN = 20  # 1行の最大文字数（絶対にこの文字数を超えないようにガードします）
+VIDEO_EXTENSIONS  = [".mp4", ".mov", ".mkv", ".avi", ".wmv", ".flv", ".webm"]
 ```
 
 ---
