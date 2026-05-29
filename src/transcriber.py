@@ -19,7 +19,7 @@ def load_word_dictionary(file_path):
                     word_dict.append(word)  # 条件をクリアした純粋な単語だけを、単語配列の末尾にスタック
 
         dict_filename = os.path.basename(file_path)
-        print(f"[*] 情報: 単語辞書 [{dict_filename}] を読み込みました（登録数: {len(word_dict)}語）")
+        print(f"\n[*] 情報: 単語辞書 [{dict_filename}] を読み込みました（登録数: {len(word_dict)}語）")
 
     except Exception as e:
         print(f"[*] 警告: 単語辞書の読み込み中にエラーが発生しました（処理は続行します）: {e}")
@@ -169,7 +169,7 @@ def clean_fillers_keep_timing(segments, filler_list):
     除去対象のフィラー語は、外部から受け取った filler_list を使用します（dictionary.txt と同じ設計パターン）。
     """
 
-    print("[*] 情報: タイムスタンプ維持型のフィラー（口癖）除去を実行中...")
+    print("\n[*] 情報: タイムスタンプ維持型のフィラー（口癖）除去を実行中...")
     cleaned_segments = []
 
     for seg in segments:

@@ -29,13 +29,13 @@ def get_unique_filepath(file_path):
 
 
 def format_timestamp(seconds):
-    """秒数（浮動小数点数）を、SRT字幕規格の厳密なフォーマット（HH:MM:SS,mmm）に1ミリ秒の狂いもなく正確に変換する関数"""
-    hours = int(seconds // 3600)  # 全体の総秒数を3600で割り、「時間（Hour）」を算出
-    minutes = int((seconds % 3600) // 60)  # 残りの秒数から、さらに60で割って「分（Minute）」を算出
-    secs = int(seconds % 60)  # 「秒（Second）」の整数部分を取得
-    milliseconds = int(round((seconds % 1) * 1000))  # 小数点以下の端数を四捨五入して「ミリ秒（Millisecond）」を3桁で取得
+    """秒数（浮動小数点数）を、SRT字幕規格の厳密なフォーマット（HH:MM:SS,mmm）に変換する関数"""
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    milliseconds = int(round((seconds % 1) * 1000))
 
-    # 四捨五入（round）の影響により、ミリ秒が1000（つまりジャスト1秒）に達してしまった場合の、時間がズレるのを防ぐ繰り上げ補正処理
+    # 丸め処理によってミリ秒が1000に達した場合の、上位桁への繰り上げ安全処理
     if milliseconds >= 1000:
         milliseconds -= 1000
         secs += 1
@@ -50,14 +50,10 @@ def format_timestamp(seconds):
 
 
 def process_segment_to_lines(segment, min_len=10, max_len=20):
-    """【デザイナーの核】ELYZAが綺麗にした1つのセグメントを、BudouXの力と単語ごとの時間情報を使って、
-    10〜20文字制限というテロップルールに応じてミリ秒単位で美しく切り刻む関数
-    """
+    """ELYZAが綺麗にした1つのセグメントを、テロップルール（10〜20文字）に応じてミリ秒単位で美しく切り刻む関数"""
     words_data = []
-    # Whisperが保持していた単語ごとの「発話開始・終了秒数」のパズルを再利用
     for w in segment.get("words", []):
         word_text = w["word"]
-        # 第1工程（transcriber）で空文字化されたフィラー（あの、えっと等）は完全に無視してスキップ
         if not word_text:
             continue
         words_data.append({
@@ -66,8 +62,8 @@ def process_segment_to_lines(segment, min_len=10, max_len=20):
             "end": float(w["end"]),
         })
 
-    lines = []               # 字幕確定データの格納リスト
-    current_line_text = ""   # 現在ビルド中の1行分のテキスト
+    lines = []
+    current_line_text = ""
     current_line_start = None
     current_line_end = None
 
@@ -76,11 +72,12 @@ def process_segment_to_lines(segment, min_len=10, max_len=20):
         w_start = w_info["start"]
         w_end = w_info["end"]
 
+        # 句点の存在チェックを行い、文字からは除去（テロップに「。」は不要なため）
         has_period = "。" in w_text
-        # 画面に表示した際にチカチカして邪魔になる「、」や「。」をテキストから消去
         clean_w_text = w_text.replace("、", "").replace("。", "")
 
         if not clean_w_text:
+            # 文字が空（句点のみ）で、すでにバッファに文字があるならそこで強制改行
             if has_period and current_line_text:
                 lines.append({
                     "text": current_line_text,
@@ -105,6 +102,10 @@ def process_segment_to_lines(segment, min_len=10, max_len=20):
             w_dur = w_end - w_start
             w_len = len(clean_w_text)
 
+            # 【改善②】Whisperが稀に出力する「発話時間ゼロ（w_dur <= 0）」による無限ループ・エラーの徹底防止セーフティ
+            if w_dur <= 0:
+                w_dur = 0.1 * (w_len / max_len)
+
             while len(clean_w_text) > max_len:
                 sub_text = clean_w_text[:max_len]
                 sub_start = w_start
@@ -122,7 +123,6 @@ def process_segment_to_lines(segment, min_len=10, max_len=20):
         # パターンB：現在の行にこの新しい単語を足すと、絶対防衛ライン（20文字）をオーバーしてしまう場合
         elif len(current_line_text) + len(clean_w_text) > max_len:
             if current_line_text:
-                # 溢れて画面外にはみ出してしまうため、現在書きかけだった行をここで一旦終了とし、確定データとして保存
                 lines.append({
                     "text": current_line_text,
                     "start": current_line_start,
@@ -132,14 +132,14 @@ def process_segment_to_lines(segment, min_len=10, max_len=20):
             current_line_start = w_start
             current_line_end = w_end
 
-        # パターンC：足しても文字数制限（20文字）以内に収まる、最も一般的な場合の結合処理
+        # パターンC：足しても文字数制限（20文字）以内に収まる場合
         else:
             if not current_line_text:
                 current_line_start = w_start
             current_line_text += clean_w_text
             current_line_end = w_end
 
-        # 単語の個別処理が終わった際、その単語の末尾に「。」（文の終わり）が含まれていた場合の区切り
+        # 句点「。」による強制改行ルール（文の終わりでテロップを区切る）
         if has_period:
             if current_line_text:
                 lines.append({
@@ -151,7 +151,7 @@ def process_segment_to_lines(segment, min_len=10, max_len=20):
                 current_line_start = None
                 current_line_end = None
 
-    # 未回収の最後の書きかけの1行を回収
+    # ループ終了後にバッファに残った最後の文字を回収
     if current_line_text:
         lines.append({
             "text": current_line_text,
@@ -162,10 +162,8 @@ def process_segment_to_lines(segment, min_len=10, max_len=20):
     # 【最後の仕上げ】BudouXを使って、日本語としてさらに自然な文節改行の位置を最終微調整
     final_processed_lines = []
     for line in lines:
-        # BudouXでバラバラに分解（例: ["今日は", "東京駅に", "行きます"]）
         chunks = parser.parse(line["text"])
         
-        # 20文字以内で、できるだけ文節が綺麗な位置になるように結合を再構成する
         temp_text = ""
         for chunk in chunks:
             if len(temp_text) + len(chunk) <= max_len:
@@ -190,7 +188,6 @@ def process_segment_to_lines(segment, min_len=10, max_len=20):
 
 def write_srt_file(refined_segments, output_srt_path):
     """【最終出力】10〜20文字に切り分けられたすべての行データを、規約に沿ったSRT字幕ファイルとして書き出す関数"""
-    print("[*] デザイナー工程: 字幕データを画面最適化サイズ（10〜20文字）にカットしながら、SRTへ書き出し中...")
     try:
         srt_index = 1
         with open(output_srt_path, "w", encoding="utf-8") as f:
@@ -209,12 +206,11 @@ def write_srt_file(refined_segments, output_srt_path):
                     f.write(f"{srt_index}\n")  # 字幕の通し番号
                     f.write(
                         f"{format_timestamp(line_data['start'])} --> {format_timestamp(line_data['end'])}\n"
-                    )  # タイムスタンプ
-                    f.write(f"{line_text}\n\n")  # テロップ文字列 ＋ 区切り空行
+                    )  # 表示する時間枠（タイムスタンプ）
+                    f.write(f"{line_text}\n\n")  # 実際の字幕テキスト本体（最後に空行が必要）
 
                     srt_index += 1
                     
-        print(f"[*] 完成: 字幕ファイルがすべて正常に出力されました！: {output_srt_path}")
         return True
     except IOError as e:
         print(f"[*] エラー: SRTファイルの書き込みに失敗しました: {e}")
