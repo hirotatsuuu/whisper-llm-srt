@@ -159,7 +159,7 @@ def process_segment_to_lines(segment, min_len=10, max_len=20):
             "end": current_line_end,
         })
 
-    # 💡【最後の仕上げ】BudouXを使って、日本語としてさらに自然な文節改行の位置を最終微調整
+    # 【最後の仕上げ】BudouXを使って、日本語としてさらに自然な文節改行の位置を最終微調整
     final_processed_lines = []
     for line in lines:
         # BudouXでバラバラに分解（例: ["今日は", "東京駅に", "行きます"]）
