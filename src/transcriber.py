@@ -163,6 +163,32 @@ def run_whisper_transcribe(audio_path, word_dict, model_size="base"):
         return [], 0.0
 
 
+def save_raw_whisper_text(raw_segments: list, output_srt_path: str):
+    """💡【機能実装】フィラー除去前の純粋な生Whisperテキストを、普通に読めるプレーンな状態で出力する関数
+    
+    音声認識モジュールの内部に厳密に配置。ファイル保存失敗時にも全体のパイプラインを巻き込んで
+    クラッシュしないよう、独立したtry-exceptブロックで保護しています。
+    """
+    if not output_srt_path or not raw_segments:
+        return
+
+    try:
+        base_filename = os.path.splitext(os.path.basename(output_srt_path))[0]
+        whisper_dir = os.path.join("output", "whisper")
+        os.makedirs(whisper_dir, exist_ok=True)
+
+        # フィラー除去も一切しない、文字起こし直後の純粋な生テキストのみを改行区切りで生成
+        whisper_txt_lines = [f"{s.get('text', '').strip()}\n" for s in raw_segments]
+        whisper_txt_path = os.path.join(whisper_dir, f"{base_filename}.txt")
+
+        with open(whisper_txt_path, "w", encoding="utf-8") as f:
+            f.writelines(whisper_txt_lines)
+        tqdm.write(f"[*] 純粋な整形前Whisperテキストを保存しました: {whisper_txt_path}")
+
+    except Exception as e:
+        tqdm.write(f"[*] 警告: 整形前Whisperテキストファイル(.txt)の保存中にエラーが発生しました: {e}")
+
+
 def clean_fillers_keep_timing(segments, filler_list):
     """タイムスタンプを維持したまま、フィラー（口癖）だけを『空文字』に置換するゴミ出し関数。
 
