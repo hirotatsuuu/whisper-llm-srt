@@ -1,32 +1,50 @@
-import argparse  # コマンドライン引数（ファイル名・モデルサイズ等）を受け取って解析するための標準ライブラリ
-from src.pipeline import run  # パイプラインの一連の処理を実行する関数をインポート
+"""
+main.py
+プログラムのエントリーポイント。
 
-# 設定ファイルからデフォルト値を参照する
-from src.config import DEFAULT_AUDIO_FILE, DEFAULT_DICT_FILE, DEFAULT_FILLER_FILE, DEFAULT_MODEL_SIZE, LLM_PROMPT_FILE
+引数の解析のみを担当し、処理の実体は src/pipeline.py の run() に委譲します。
+設定値のデフォルトは src/config.py に一元管理されています。
+"""
 
-def main():
-    
-    # スクリプトの実行時引数の受付を設定
+import argparse  # コマンドライン引数を受け取って解析するための標準ライブラリ
+import os        # 入力ファイルの存在確認に使うライブラリ
+import sys       # ファイルが見つからない場合の強制終了に使うライブラリ
+
+from src.config import (
+    DEFAULT_AUDIO_FILE,
+    DEFAULT_DICT_FILE,
+    DEFAULT_FILLER_FILE,
+    DEFAULT_MODEL_SIZE,
+    DEFAULT_PROMPT_FILE,
+)
+from src.pipeline import run
+
+
+def main() -> None:
+    """引数を解析してパイプラインを起動する関数。処理の実体は src/pipeline.py にあります。"""
     parser = argparse.ArgumentParser(
-        description="動画または音声ファイルからローカルLLMで校正され、10〜20文字に最適化されたSRT字幕を出力するスクリプト"
+        description="動画または音声ファイルからローカル LLM で校正され、10〜20 文字に最適化された SRT 字幕を出力するスクリプト"
     )
     parser.add_argument(
-        "input_file", nargs="?", default=DEFAULT_AUDIO_FILE, help="入力ファイル（動画または音声）のパス"
+        "input_file", nargs="?", default=DEFAULT_AUDIO_FILE,
+        help="入力ファイル（動画または音声）のパス"
     )
     parser.add_argument("-d", "--dict",   default=DEFAULT_DICT_FILE,   help="優先単語リスト（dictionary.txt）のパス")
     parser.add_argument("-f", "--filler", default=DEFAULT_FILLER_FILE, help="フィラーリスト（filler.txt）のパス")
-    parser.add_argument("-m", "--model",  default=DEFAULT_MODEL_SIZE,  help="Whisperのモデルサイズ指定")
-    
-    # 💡【機能拡張】実行時引数としてLLM用のプロンプトテンプレートのファイルパスを受け取れるように拡張
-    parser.add_argument("-p", "--prompt", default=LLM_PROMPT_FILE,   help="LLM校正用プロンプトテンプレート（prompt.txt）のパス")
-    
-    # --no-llm をつけて実行するとLLM校正をスキップし、Whisper生データのまま書き出します
-    parser.add_argument("--no-llm", action="store_true", help="LLMによる文脈校正工程をスキップする")
+    parser.add_argument("-p", "--prompt", default=DEFAULT_PROMPT_FILE, help="LLM プロンプトテンプレートファイルのパス")
+    parser.add_argument("-m", "--model",  default=DEFAULT_MODEL_SIZE,  help="Whisper のモデルサイズ指定（tiny/base/small/medium/large）")
+    # --no-llm をつけて実行すると LLM 校正をスキップし、Whisper 生データのまま SRT を書き出します
+    parser.add_argument("--no-llm", action="store_true", help="LLM による文脈校正工程をスキップする")
 
     args = parser.parse_args()
 
-    # 引数オブジェクトをそのままパイプラインへ引き渡す
+    # 指定されたファイルが実在するか確認する（パイプライン開始前に早期終了させる）
+    if not os.path.exists(args.input_file):
+        print(f"[エラー] 入力ファイルが見つかりません: {args.input_file}")
+        sys.exit(1)
+
     run(args)
+
 
 if __name__ == "__main__":
     main()
