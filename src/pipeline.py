@@ -73,7 +73,12 @@ def run(args) -> None:
     各工程で回復不能なエラーが発生した場合は sys.exit(1) でプログラムを停止します。
     """
     start_time = time.perf_counter()  # 総処理時間の計測開始
+
     tqdm.write("[*] whisper-llm-srt を起動しました")
+
+        # クリーンアップ処理で参照するため、with ブロックの外で初期化しておく
+    target_audio_file = args.input_file
+    is_video_input    = False
 
     # 入力ファイルの拡張子を解析して動画か音声かを判別する
     base_path, ext = os.path.splitext(args.input_file)
@@ -81,26 +86,26 @@ def run(args) -> None:
 
     # 【上書き防止】LLM 校正版 SRT のユニークな出力パスをまず確定させる（例: test_2.srt）
     # その後 build_output_paths() で全出力ファイルのパスを一括生成する
-    output_srt_path = get_unique_filepath(base_path + ".srt")
-
-    # 全出力ファイルのパスを命名規則に従って一括生成する
-    paths = build_output_paths(output_srt_path)
-
-    # 上記の build_output_paths 内でエラーがスローされた際、進行状況バーを破壊せず異常終了させるためのガード処理です
-    if not isinstance(paths, dict):
+    try:
+        paths = build_output_paths(args.input_file)
+    except FileWriteError as e:
+        tqdm.write(f"[エラー] 出力ディレクトリの作成に失敗しました: {e}")
         sys.exit(1)
-
-    target_audio_file = args.input_file
-    is_video_input    = ext_lower in VIDEO_EXTENSIONS
+    
+    is_video_input = ext_lower in VIDEO_EXTENSIONS
 
     # 動画ファイルの場合、ffmpeg で音声（.m4a）をバックグラウンドで抽出してから処理する
     if is_video_input:
-        extracted_audio_path = get_unique_filepath(base_path + ".m4a")
+        # REMOVE_TEMP_AUDIO = True  → 処理完了後に output/audio/ から削除する
+        # REMOVE_TEMP_AUDIO = False → 処理完了後も output/audio/ に残す
+        extracted_audio_path = paths["extracted_audio"]
+
         try:
             extract_audio_from_video(args.input_file, extracted_audio_path)
         except (AudioExtractionError, FfmpegNotFoundError) as e:
             tqdm.write(f"[エラー] 音声抽出に失敗しました: {e}")
             sys.exit(1)
+    
         target_audio_file = extracted_audio_path
 
     # -----------------------------------------------------------------
@@ -108,111 +113,135 @@ def run(args) -> None:
     # 進捗バーは「純粋なバー + 進捗数字」のみのシンプルな表示にしています。
     # 各工程内のログは tqdm.write() で出力し、バーの表示を破壊しません。
     # -----------------------------------------------------------------
-    with tqdm(
-        total=len(_PIPELINE_STEPS),
-        bar_format=_BAR_FORMAT,
-        dynamic_ncols=False,  # バーが横いっぱいに伸びてチカチカするのを防ぐ
-        unit="step",
-    ) as pbar:
+    try:
+        with tqdm(
+            total=len(_PIPELINE_STEPS),
+            bar_format=_BAR_FORMAT,
+            dynamic_ncols=False,  # バーが横いっぱいに伸びてチカチカするのを防ぐ
+            unit="step",
+        ) as pbar:
 
-        # 【工程 1/5】専門用語辞書とフィラーリストの読み込み
-        word_dict   = load_word_dictionary(args.dict)
-        filler_list = load_filler_list(args.filler)
-        pbar.update(1)
+            # 【工程 1/5】専門用語辞書とフィラーリストの読み込み
+            word_dict   = load_word_dictionary(args.dict)
+            filler_list = load_filler_list(args.filler)
+            pbar.update(1)
 
-        # 【工程 2/5】Whisper による音声解析と文字起こし
-        try:
-            raw_segments, whisper_elapsed = run_whisper_transcribe(
-                audio_path=target_audio_file,
-                word_dict=word_dict,
-                model_size=args.model,
-            )
-        except (WhisperModelLoadError, WhisperTranscribeError) as e:
-            tqdm.write(f"[エラー] Whisper の処理に失敗しました: {e}")
-            sys.exit(1)
-
-        tqdm.write(f"[*] Whisper 処理時間: {whisper_elapsed:.2f} 秒")
-        pbar.update(1)
-
-        if not raw_segments:
-            tqdm.write("[エラー] Whisper の出力が空です。音声ファイルを確認してください。")
-            sys.exit(1)
-
-        # 【工程 3/5】フィラー（えっと・あの等）をタイムスタンプを維持したまま空文字に置換する
-        cleaned_segments = clean_fillers_keep_timing(raw_segments, filler_list)
-        pbar.update(1)
-
-        # LLM が書き換える前の「フィラー除去済み生データ」をディープコピーして退避する
-        # これが Whisper 限定版（校正前）の SRT 出力データになる
-        whisper_only_segments = copy.deepcopy(cleaned_segments)
-
-        # 【工程 4/5】LLM が前後の文脈をもとにバッチ校正する
-        if args.no_llm:
-            # --no-llm 指定時は LLM 校正をスキップし、フィラー除去済み生データをそのまま使う
-            tqdm.write("[*] --no-llm が指定されたため、LLM 校正工程をスキップします。")
-            llm_refined_segments = copy.deepcopy(whisper_only_segments)
-        else:
+            # 【工程 2/5】Whisper による音声解析と文字起こし
             try:
-                llm_refined_segments, llm_elapsed = refine_context_with_llm(
-                    segments=cleaned_segments,
-                    prompt_file_path=args.prompt,
+                raw_segments, whisper_elapsed = run_whisper_transcribe(
+                    audio_path=target_audio_file,
+                    word_dict=word_dict,
+                    model_size=args.model,
                 )
-            except (PromptFileNotFoundError, InvalidConfigError) as e:
-                # プロンプト不正・設定値不正は回復不能のため処理を停止する
-                tqdm.write(f"[エラー] LLM 校正の設定に問題があります: {e}")
+            except (WhisperModelLoadError, WhisperTranscribeError) as e:
+                tqdm.write(f"[エラー] Whisper の処理に失敗しました: {e}")
                 sys.exit(1)
 
-            tqdm.write(f"[*] LLM 処理時間: {llm_elapsed:.2f} 秒")
+            tqdm.write(f"[*] Whisper 処理時間: {whisper_elapsed:.2f} 秒")
+            pbar.update(1)
 
-            # LLM 校正後のテキストをプレーンテキストとして保存する
-            # output/refined/<stem>_refined.txt
+            if not raw_segments:
+                tqdm.write("[エラー] Whisper の出力が空です。音声ファイルを確認してください。")
+                sys.exit(1)
+
+            # 【工程 3/5】フィラー（えっと・あの等）をタイムスタンプを維持したまま空文字に置換する
+            cleaned_segments = clean_fillers_keep_timing(raw_segments, filler_list)
+            pbar.update(1)
+
+            # LLM が書き換える前の「フィラー除去済み生データ」をディープコピーして退避する
+            # これが Whisper 限定版（校正前）の SRT 出力データになる
+            whisper_only_segments = copy.deepcopy(cleaned_segments)
+
+            # 【工程 4/5】LLM が前後の文脈をもとにバッチ校正する
+            # LLM 校正をスキップするかどうかをここで一度だけ決定する
+            skip_llm = (
+                args.no_llm                         # --no-llm フラグが指定された場合
+                or not os.path.exists(args.prompt)  # プロンプトファイルが存在しない場合
+            )
+
+            if args.no_llm:
+                # プロンプトファイルが無い時は LLM 校正をスキップし、フィラー除去済み生データをそのまま使う
+                tqdm.write("[*] --no-llm が指定されたため、LLM 校正工程をスキップします。")
+            elif not os.path.exists(args.prompt):
+                # --no-llm 指定時は LLM 校正をスキップし、フィラー除去済み生データをそのまま使う
+                tqdm.write(f"[*] プロンプトファイルが見つからないため、LLM 校正をスキップします: {args.prompt}")
+
+            # 【工程 4/5】
+            if skip_llm:
+                llm_refined_segments = copy.deepcopy(whisper_only_segments)
+            else:
+                try:
+                    llm_refined_segments, llm_elapsed = refine_context_with_llm(
+                        segments=cleaned_segments,
+                        prompt_file_path=args.prompt,
+                        batch_size=args.batch_size_llm
+                    )
+                except (PromptFileNotFoundError, InvalidConfigError) as e:
+                    # プロンプト不正・設定値不正は回復不能のため処理を停止する
+                    tqdm.write(f"[エラー] LLM 校正の設定に問題があります: {e}")
+                    sys.exit(1)
+                tqdm.write(f"[*] LLM 処理時間: {llm_elapsed:.2f} 秒")
+
+            pbar.update(1)
+
+            # 【工程 5/5】BudouX による文字数カット + ファイルの書き出し
             try:
-                save_segments_as_plaintext(llm_refined_segments, paths["refined_txt"])
-                tqdm.write(f"[*] LLM 校正テキストを保存しました: {paths['refined_txt']}")
+                # 【どんな状態でも、ベースとなる Whisper に関する 3 ファイルは必ず生成されます】
+                # srt/ フォルダへ
+                write_srt_file(
+                    whisper_only_segments,
+                    paths["whisper_srt"],
+                    min_char_len=args.min_char_len,  # main.py の引数から届いた値
+                    max_char_len=args.max_char_len
+                )
+                save_segments_as_json(whisper_only_segments, paths["whisper_json"])  # transcript/ フォルダへ
+                save_segments_as_plaintext(whisper_only_segments, paths["whisper_txt"]) # text/ フォルダへ
+
+                # Whisperの出力ファイル群
+                tqdm.write(f"[+] 【Whisper 版 SRT 】{paths['whisper_srt']}")
+                tqdm.write(f"[+] 【Whisper 生データ】{paths['whisper_json']}")
+                tqdm.write(f"[+] 【Whisper テキスト】{paths['whisper_txt']}")
+
+                # 【追加で refined の 3 ファイルが生成され、計 6 ファイルになります】
+                if not skip_llm:
+                    # srt/ フォルダへ
+                    write_srt_file(
+                        llm_refined_segments,
+                        paths["refined_srt"],
+                        min_char_len=args.min_char_len,
+                        max_char_len=args.max_char_len
+                    )         
+                    save_segments_as_json(llm_refined_segments, paths["refined_json"])  # transcript/ フォルダへ
+                    save_segments_as_plaintext(llm_refined_segments, paths["refined_txt"]) # text/ フォルダへ
+
+                    # LLMの出力ファイル群
+                    tqdm.write(f"[+] 【LLM 校正版 SRT 】{paths['refined_srt']}")
+                    tqdm.write(f"[+] 【LLM 生データ   】{paths['refined_json']}")
+                    tqdm.write(f"[+] 【LLM 校正テキスト】{paths['refined_txt']}")
+                    
             except FileWriteError as e:
-                tqdm.write(f"[警告] LLM 校正テキストの保存中にエラーが発生しました（処理は続行します）: {e}")
+                tqdm.write(f"[エラー] 成果物ファイルの書き出しに失敗しました: {e}")
+                sys.exit(1)
 
-        pbar.update(1)
-
-        # 【工程 5/5】BudouX による文字数カット + ファイルの書き出し
-        try:
-            # 【どんな状態でも、ベースとなる Whisper に関する 3 ファイルは必ず生成されます】
-            write_srt_file(whisper_only_segments, paths["whisper_srt"])          # srt/ フォルダへ
-            save_segments_as_json(whisper_only_segments, paths["whisper_json"])  # transcript/ フォルダへ
-            save_segments_as_plaintext(whisper_only_segments, paths["whisper_txt"]) # text/ フォルダへ
-
-            # Whisperの出力ファイル群
-            tqdm.write(f"[+] 【Whisper 版 SRT 】{paths['whisper_srt']}")
-            tqdm.write(f"[+] 【Whisper 生データ】{paths['whisper_json']}")
-            tqdm.write(f"[+] 【Whisper テキスト】{paths['whisper_txt']}")
-
-            # 【no_llm ではない場合（else）は、追加で refined の 3 ファイルが生成され、計 6 ファイルになります】
-            if not args.no_llm:
-                write_srt_file(llm_refined_segments, paths["refined_srt"])          # srt/ フォルダへ
-                save_segments_as_json(llm_refined_segments, paths["refined_json"])  # transcript/ フォルダへ
-                save_segments_as_plaintext(llm_refined_segments, paths["refined_txt"]) # text/ フォルダへ
-
-                # LLMの出力ファイル群
-                tqdm.write(f"[+] 【LLM 校正版 SRT 】{paths['refined_srt']}")
-                tqdm.write(f"[+] 【LLM 生データ   】{paths['refined_txt']}")
-                tqdm.write(f"[+] 【LLM 校正テキスト】{paths['refined_txt']}")
-                
-        except FileWriteError as e:
-            tqdm.write(f"[エラー] 成果物ファイルの書き出しに失敗しました: {e}")
-            sys.exit(1)
-
-        pbar.update(1)
+            pbar.update(1)
 
     # -----------------------------------------------------------------
     # 【後始末クリーンアップ】
     # -----------------------------------------------------------------
-    if is_video_input and REMOVE_TEMP_AUDIO:
-        try:
-            if os.path.exists(target_audio_file):
-                os.remove(target_audio_file)  # 一時音声ファイルを削除
-                tqdm.write(f"[*] 一時音声ファイルを削除しました: {target_audio_file}")
-        except OSError as e:
-            # クリーンアップ失敗は警告にとどめる（メイン処理は完了しているため）
-            tqdm.write(f"[警告] 一時音声ファイルの削除中にエラーが発生しました: {e}")
+    # 正常終了・エラー終了どちらでも必ずここが実行される。
+    # REMOVE_TEMP_AUDIO = True の場合のみ output/audio/ から削除する。
+    # REMOVE_TEMP_AUDIO = False の場合はそのまま output/audio/ に残す。
+    finally:
+        if is_video_input and REMOVE_TEMP_AUDIO:
+            try:
+                if os.path.exists(target_audio_file):
+                    os.remove(target_audio_file)  # 一時音声ファイルを削除
+                    tqdm.write(f"[*] 一時音声ファイルを削除しました: {target_audio_file}")
+            except OSError as e:
+                # クリーンアップ失敗は警告にとどめる（メイン処理は完了しているため）
+                tqdm.write(f"[警告] 一時音声ファイルの削除中にエラーが発生しました: {e}")
+        elif is_video_input and not REMOVE_TEMP_AUDIO:
+            # 削除しない場合は保存先をログに残す
+            tqdm.write(f"[*] 抽出した音声ファイルを保存しました: {target_audio_file}")
 
     tqdm.write(f"[*] 総処理時間: {time.perf_counter() - start_time:.2f} 秒")

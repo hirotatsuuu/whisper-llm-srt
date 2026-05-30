@@ -63,7 +63,7 @@ def load_filler_list(file_path: str) -> list[str]:
     """外部テキストファイル（フィラーリスト）から、除去対象の口癖・フィラー語を読み込む関数。
 
     dictionary.txt と同じ書式（1 行 1 語、# でコメント）に対応しています。
-    ファイルが存在しない場合は空
+    ファイルが存在しない場合は空を返します。
 
     Args:
         file_path: 読み込みたいフィラーリストファイルのパス。
@@ -99,7 +99,7 @@ def load_filler_list(file_path: str) -> list[str]:
 def get_audio_duration(file_path: str) -> float | None:
     """ffprobe を使ってファイルの総再生秒数を取得する関数。
 
-    Whisper の処理進捗を把握するための補助的な情報取得に使います。
+    文字起こし開始前に音声の長さをログ表示するために使います。
     取得に失敗した場合は None を返します（None の場合でも処理は続行可能です）。
 
     Args:
@@ -121,55 +121,58 @@ def get_audio_duration(file_path: str) -> float | None:
             output = output.split("duration=")[-1].strip()
         return float(output)
     except Exception:
-        # 取得できなくても処理は続行できるため、例外は握りつぶさず None を返す
+        # ffprobe が見つからない・対応外フォーマット等は警告せず None を返す
+        # 呼び出し元で None チェックしてから表示の有無を判断する
         return None
 
 
 def extract_audio_from_video(video_path: str, output_audio_path: str) -> None:
     """ffmpeg を呼び出し、動画ファイルから音声ストリームだけを抽出する関数。
 
-    まず無劣化コピー（-acodec copy）を試みます。
-    コーデックの非互換等で失敗した場合は AAC 再エンコードにフォールバックします。
+    無劣化コピー（-acodec copy）は動画の音声コーデックによって
+    コンテナとの組み合わせが不正になり、壊れたファイルが生成される場合があるため使用しない。
+    常に AAC 再エンコードで出力することで、どんなコーデックの動画でも安定して抽出できる。
+
+    Whisper は 16kHz モノラルで処理するため、サンプリングレートとチャンネル数を
+    ここで統一しておくことで Whisper 内部の再デコード負荷を最小限にする。
 
     Args:
-        video_path: 入力動画ファイルのパス。
-        output_audio_path: 抽出した音声の出力パス（.m4a 等）。
+        video_path:        入力動画ファイルのパス。
+        output_audio_path: 抽出した音声の出力パス（.m4a）。
 
     Raises:
         FfmpegNotFoundError: ffmpeg がシステムにインストールされていない場合。
-        AudioExtractionError: 無劣化・再エンコードともに音声抽出に失敗した場合。
+        AudioExtractionError: 音声抽出に失敗した場合。
     """
     tqdm.write(f"[*] 動画ファイルを検出しました。音声を抽出中...: {video_path}")
 
     command = [
         "ffmpeg",
-        "-y", "-i", video_path,
-        "-vn", "-acodec", "copy",  # 音声ストリームを無劣化でコピー
-        output_audio_path,
+        "-y",                   # 出力ファイルが存在する場合は上書きする
+        "-i", video_path,       # 入力ファイル
+        "-vn",                  # 映像ストリームを除外する
+        "-acodec", "aac",       # AAC に再エンコードする（コーデック不問で安定して動く）
+        "-ar", "16000",         # サンプリングレートを 16kHz に統一（Whisper の推奨値）
+        "-ac", "1",             # モノラルに変換（Whisper はモノラルで処理する）
+        "-b:a", "128k",         # ビットレートを 128kbps に指定（音質と容量のバランス）
+        output_audio_path,      # 出力先（.m4a）
     ]
 
     try:
-        subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+        result = subprocess.run(
+            command,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,   # stderr を取得してエラー内容をログに残せるようにする
+            check=True,
+        )
         tqdm.write(f"[*] 音声の抽出が完了しました: {output_audio_path}")
-        return
 
-    except subprocess.CalledProcessError:
-        # 無劣化コピーに失敗した場合、AAC エンコードにフォールバックして再試行する
-        tqdm.write("[*] 音声の無劣化抽出に失敗しました。AAC エンコード抽出に切り替えます...")
-        fallback_command = [
-            "ffmpeg",
-            "-y", "-i", video_path,
-            "-vn", "-acodec", "aac",
-            output_audio_path,
-        ]
-        try:
-            subprocess.run(fallback_command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
-            tqdm.write(f"[*] 音声の抽出（AAC 再エンコード）が完了しました: {output_audio_path}")
-            return
-        except subprocess.CalledProcessError as e:
-            raise AudioExtractionError(
-                f"動画からの音声抽出に失敗しました（無劣化・再エンコードともに失敗）: {video_path}"
-            ) from e
+    except subprocess.CalledProcessError as e:
+        stderr_message = e.stderr.decode("utf-8", errors="replace").strip() if e.stderr else "不明"
+        raise AudioExtractionError(
+            f"動画からの音声抽出に失敗しました: {video_path}\n"
+            f"ffmpeg エラー出力: {stderr_message}"
+        ) from e
 
     except FileNotFoundError as e:
         raise FfmpegNotFoundError(
@@ -209,6 +212,28 @@ def run_whisper_transcribe(
         WhisperModelLoadError: モデルのメモリへの読み込みに失敗した場合。
         WhisperTranscribeError: 文字起こし処理中に予期せぬエラーが発生した場合。
     """
+    # 音声ファイルの存在とサイズを確認する。
+    # 抽出に失敗して壊れた（空の）ファイルが渡された場合に早期検出できる。
+    if not os.path.exists(audio_path):
+        raise WhisperTranscribeError(
+            f"音声ファイルが見つかりません: {audio_path}"
+        )
+    file_size = os.path.getsize(audio_path)
+    if file_size == 0:
+        raise WhisperTranscribeError(
+            f"音声ファイルのサイズが 0 バイトです。音声抽出が正常に完了しなかった可能性があります: {audio_path}"
+        )
+    tqdm.write(f"[*] 音声ファイルを確認しました（サイズ: {file_size / 1024:.1f} KB）: {audio_path}")
+
+    duration = get_audio_duration(audio_path)
+    if duration is not None:
+        # 秒数を「X 分 Y 秒」形式に変換して表示する
+        minutes = int(duration // 60)
+        seconds = int(duration % 60)
+        tqdm.write(f"[*] 音声の長さ: {minutes} 分 {seconds} 秒（{duration:.1f} 秒）")
+    else:
+        tqdm.write("[*] 音声の長さを取得できませんでした（処理は続行します）")
+    
     # 辞書が登録されている場合は、Whisper の initial_prompt に単語リストを埋め込む
     # 句読点で囲むことで、Whisper が単語の区切りを誤認識するのを防ぐ
     prompt_string = ""
@@ -236,7 +261,7 @@ def run_whisper_transcribe(
         result = model.transcribe(
             audio_path,
             verbose=None,
-            fp16=False,            # GPU 非搭載環境でも動くように 32bit 演算を強制
+            fp16=False,            # CPUの場合 32bit 演算を強制、GPUの場合はTrueにすると高速化できる
             initial_prompt=prompt_string,
             language="ja",         # 日本語に固定
             word_timestamps=True,  # 単語単位のタイムスタンプを取得（後続処理で必須）
@@ -274,6 +299,11 @@ def clean_fillers_keep_timing(segments: list, filler_list: list[str]) -> list:
     Returns:
         フィラーを空文字に置換したセグメントのリスト。
     """
+
+    if not filler_list:
+        tqdm.write("[*] フィラーリストが空のため、フィラー除去処理をスキップします。")
+        return segments  # segments をそのまま返す（コピーせず参照渡し。変更しないため問題なし）
+    
     tqdm.write("[*] タイムスタンプ維持型フィラー除去を実行中...")
     cleaned_segments = []
 
