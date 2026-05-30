@@ -138,18 +138,6 @@ def run(args) -> None:
             tqdm.write("[エラー] Whisper の出力が空です。音声ファイルを確認してください。")
             sys.exit(1)
 
-        # Whisper 生データをファイルに保存する（フィラー除去前の純粋な生テキスト）
-        # output/whisper/<stem>_whisper.json（タイムスタンプ含む全データ）
-        # output/whisper/<stem>_whisper.txt（人が読みやすいプレーンテキスト）
-        try:
-            save_segments_as_json(raw_segments, paths["whisper_json"])
-            tqdm.write(f"[*] Whisper 生データ（JSON）を保存しました: {paths['whisper_json']}")
-            save_segments_as_plaintext(raw_segments, paths["whisper_txt"])
-            tqdm.write(f"[*] Whisper 生テキストを保存しました: {paths['whisper_txt']}")
-        except FileWriteError as e:
-            # 補助出力の失敗はパイプラインを停止させない（警告にとどめる）
-            tqdm.write(f"[警告] Whisper 生データの保存中にエラーが発生しました（処理は続行します）: {e}")
-
         # 【工程 3/5】フィラー（えっと・あの等）をタイムスタンプを維持したまま空文字に置換する
         cleaned_segments = clean_fillers_keep_timing(raw_segments, filler_list)
         pbar.update(1)
@@ -193,11 +181,21 @@ def run(args) -> None:
             save_segments_as_json(whisper_only_segments, paths["whisper_json"])  # transcript/ フォルダへ
             save_segments_as_plaintext(whisper_only_segments, paths["whisper_txt"]) # text/ フォルダへ
 
+            # Whisperの出力ファイル群
+            tqdm.write(f"[+] 【Whisper 版 SRT 】{paths['whisper_srt']}")
+            tqdm.write(f"[+] 【Whisper 生データ】{paths['whisper_json']}")
+            tqdm.write(f"[+] 【Whisper テキスト】{paths['whisper_txt']}")
+
             # 【no_llm ではない場合（else）は、追加で refined の 3 ファイルが生成され、計 6 ファイルになります】
             if not args.no_llm:
                 write_srt_file(llm_refined_segments, paths["refined_srt"])          # srt/ フォルダへ
                 save_segments_as_json(llm_refined_segments, paths["refined_json"])  # transcript/ フォルダへ
                 save_segments_as_plaintext(llm_refined_segments, paths["refined_txt"]) # text/ フォルダへ
+
+                # LLMの出力ファイル群
+                tqdm.write(f"[+] 【LLM 校正版 SRT 】{paths['refined_srt']}")
+                tqdm.write(f"[+] 【LLM 生データ   】{paths['refined_txt']}")
+                tqdm.write(f"[+] 【LLM 校正テキスト】{paths['refined_txt']}")
                 
         except FileWriteError as e:
             tqdm.write(f"[エラー] 成果物ファイルの書き出しに失敗しました: {e}")
@@ -216,19 +214,5 @@ def run(args) -> None:
         except OSError as e:
             # クリーンアップ失敗は警告にとどめる（メイン処理は完了しているため）
             tqdm.write(f"[警告] 一時音声ファイルの削除中にエラーが発生しました: {e}")
-
-    # 成果物のパスと総処理時間をまとめて表示する
-    tqdm.write("")
-
-    # Whisperの出力ファイル群
-    tqdm.write(f"[+] 【Whisper 版 SRT 】{paths['whisper_srt']}")
-    tqdm.write(f"[+] 【Whisper 生データ】{paths['whisper_json']}")
-    tqdm.write(f"[+] 【Whisper テキスト】{paths['whisper_txt']}")
-
-    # LLMの出力ファイル群
-    if not args.no_llm:
-        tqdm.write(f"[+] 【LLM 校正版 SRT 】{paths['refined_srt']}")
-        tqdm.write(f"[+] 【LLM 生データ   】{paths['refined_txt']}")
-        tqdm.write(f"[+] 【LLM 校正テキスト】{paths['refined_txt']}")
 
     tqdm.write(f"[*] 総処理時間: {time.perf_counter() - start_time:.2f} 秒")

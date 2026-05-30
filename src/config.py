@@ -17,10 +17,10 @@ DEFAULT_DICT_FILE   = "./resources/dictionary.txt" # 優先的に認識させた
 DEFAULT_FILLER_FILE = "./resources/filler.txt"     # 除去したいフィラー語（「えっと」「あのー」等）のテキストファイル
 DEFAULT_PROMPT_FILE = "./resources/prompt.txt"     # LLM 校正に使うプロンプトテンプレートのテキストファイル
 
-# --- 入力ファイルのデフォルトパス ---
-OUTPUT_SRT_DIR        = "./output/srt"             # 生成された字幕ファイル(srt形式)
-OUTPUT_TRANSCRIPT_DIR = "./output/transcript"      # 生成されたwhisperの生データファイル(json形式)
-OUTPUT_TEXT_DIR       = "./output/text"            # 生成された全てのテキストをまとめたファイル(txt形式)
+# --- 出力ファイルのデフォルトパス ---
+OUTPUT_SRT_DIR        = "./output/srt/"             # 生成された字幕ファイル(srt形式)
+OUTPUT_TRANSCRIPT_DIR = "./output/transcript/"      # 生成されたwhisperの生データファイル(json形式)
+OUTPUT_TEXT_DIR       = "./output/text/"            # 生成された全てのテキストをまとめたファイル(txt形式)
 
 # --- Whisper ---
 DEFAULT_MODEL_SIZE = "base"  # モデルサイズ（速度優先: tiny/base、精度優先: small/medium/large）
