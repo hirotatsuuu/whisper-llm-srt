@@ -39,8 +39,11 @@ from src.utils import read_text_file
 # 出力フォーマットが崩れるリスクを防いでいます。
 _OUTPUT_FORMAT_BLOCK = """
 【出力フォーマット】（このフォーマットを厳守してください）
-ID: 番号 | TEXT: 校正後のテキスト
-ID: 番号 | TEXT: 校正後のテキスト
+番号|||校正後のテキスト
+
+【出力例】
+1|||本日はお越しいただきありがとうございます。
+2|||次の議題に移りましょう。
 
 【補正対象データ】
 """
@@ -135,43 +138,66 @@ def _validate_timestamps(batch_seg: dict) -> None:
 def _parse_llm_response(llm_lines: list[str], target_id: int, old_text: str) -> str:
     """LLM の出力行リストから、指定した ID に対応するテキストを抽出する関数。
 
-    LLM が途中で改行を入れて複数行で返してきた場合でも、
-    次の「ID:」行が出現するまですべての行を結合して回収します。
+    LLM への出力フォーマット指示として「番号|||テキスト」形式を使用しています。
+    区切り文字 ||| は日本語テキストに出現しないため、誤検出・誤分割が発生しません。
+    split("|||", 1) の maxsplit=1 により、本文中に ||| が含まれていても安全に分割できます。
 
+    LLM が複数行に分けて返してきた場合は、次の有効な ||| 行が来るまで結合して回収します。
     空文字が返ってきた場合（LLM の誤動作）は、元のテキストを維持するガードが働きます。
 
     Args:
         llm_lines: LLM の応答を改行で分割した文字列リスト。
-        target_id: 取り出したいセグメントの ID 番号。
-        old_text: 元のテキスト（ID が見つからない場合・空文字が返った場合のフォールバック）。
+        target_id: 取り出したいセグメントの ID 番号（整数）。
+        old_text:  元のテキスト（ID が見つからない・空文字が返った場合のフォールバック）。
 
     Returns:
         LLM による校正後テキスト。見つからない場合・空文字の場合は old_text を返す。
     """
-    found_target  = False   # 対象 ID の行を見つけたかどうかのフラグ
-    collected_lines = []    # 複数行にまたがる場合のテキスト回収バッファ
+    # 対象 ID の行を見つけたかどうかのフラグ
+    found_target    = False
+    # 複数行にまたがる場合のテキスト回収バッファ
+    collected_lines = []
 
     for line in llm_lines:
-        # 対象 ID の開始行を検出する（スペースあり・なし両方に対応）
-        if f"ID: {target_id} " in line or f"ID:{target_id}" in line:
-            found_target = True
-            if "TEXT:" in line:
-                # TEXT: の後ろの部分を抽出してバッファに追加
-                collected_lines.append(line.split("TEXT:", 1)[1].strip())
+        stripped = line.strip()
+
+        # 空行はスキップする
+        if not stripped:
             continue
 
-        # 対象 ID の回収中に別の「ID:」行が現れたら回収終了
-        if found_target:
-            if "ID: " in line or "ID:" in line:
+        # ||| が含まれる行は「番号|||テキスト」形式の ID 行として処理する
+        if "|||" in stripped:
+            parts = stripped.split("|||", 1)  # maxsplit=1 で最初の ||| だけで分割する
+
+            # parts[0] が数字かどうか確認する（LLM が余計な文字を混入させた場合の防御）
+            id_part = parts[0].strip()
+            if not id_part.isdigit():
+                # 数字でない場合はフォーマット崩れとみなしてスキップ
+                continue
+
+            line_id = int(id_part)
+
+            if line_id == target_id:
+                # 対象 ID の行を発見した
+                found_target = True
+                if len(parts) > 1:
+                    # ||| より後ろがテキスト本文
+                    collected_lines.append(parts[1].strip())
+            elif found_target:
+                # 対象 ID の回収中に別の ID 行が来たので回収終了
                 break
-            # 別の ID でなければ LLM が挿入した改行とみなしてテキストを追記
-            collected_lines.append(line.strip())
+
+            continue  # ID 行の処理が終わったので次の行へ
+
+        # ||| を含まない行は、対象 ID の回収中であれば LLM が挿入した改行とみなして追記する
+        if found_target:
+            collected_lines.append(stripped)
 
     if not found_target:
-        # 対象 ID が LLM の出力から見つからなかった場合は元のテキストで維持
+        # 対象 ID が LLM の出力から見つからなかった場合は元のテキストを維持する
         return old_text
 
-    # 複数行に分かれていたテキストを 1 つに結合（スペースを挟まずに結合）
+    # 複数行に分かれていたテキストを1つに結合する（スペースを挟まず結合）
     parsed_text = "".join(collected_lines).strip()
 
     # LLM が誤って空文字を返してきた場合は元のテキストを維持するガード
@@ -247,10 +273,10 @@ def refine_context_with_llm(
         if not (has_punctuation or is_batch_full):
             continue
 
-        # バッチ内の各セグメントを「ID: X | TEXT: Y」形式の文字列に整形する
+        # バッチ内の各セグメントを「ID|||TEXT」形式の文字列に整形する
         batch_prompt_text = ""
         for batch_seg in current_batch:
-            batch_prompt_text += f"ID: {batch_seg['id']} | TEXT: {batch_seg['text']}\n"
+            batch_prompt_text += f"{batch_seg['id']}|||{batch_seg['text']}\n"
 
         # ベースプロンプトの末尾にバッチテキストを結合して完全なプロンプトを組み立てる
         prompt = base_prompt + batch_prompt_text
