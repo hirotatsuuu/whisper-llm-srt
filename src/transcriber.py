@@ -18,7 +18,6 @@ import time        # Whisper 処理時間を小数点 2 桁まで計測するた
 from whisper import load_model  # OpenAI Whisper のモデルをローカルにロードするための関数
 from tqdm import tqdm  # tqdm.write を使って進捗バーを破壊せずにログを出力するためのライブラリ
 
-from src.config import DEFAULT_FILLERS
 from src.exceptions import (
     AudioExtractionError,
     FfmpegNotFoundError,
@@ -46,7 +45,7 @@ def load_word_dictionary(file_path: str) -> list[str]:
         辞書に登録された単語の文字列リスト。ファイルが存在しない場合は空リスト。
     """
     if not file_path or not os.path.exists(file_path):
-        tqdm.write(f"[*] 注意: 単語辞書ファイルが見つかりません: {file_path} (辞書なしで処理を続行します)")
+        tqdm.write(f"[*] 注意: 単語辞書ファイルが見つかりません: {file_path}")
         return []
 
     try:
@@ -64,30 +63,30 @@ def load_filler_list(file_path: str) -> list[str]:
     """外部テキストファイル（フィラーリスト）から、除去対象の口癖・フィラー語を読み込む関数。
 
     dictionary.txt と同じ書式（1 行 1 語、# でコメント）に対応しています。
-    ファイルが存在しない、または中身が空の場合は config.py の DEFAULT_FILLERS で代替します。
+    ファイルが存在しない場合は空
 
     Args:
         file_path: 読み込みたいフィラーリストファイルのパス。
 
     Returns:
-        フィラー語の文字列リスト。ファイルが存在しない場合はデフォルトリスト。
+        フィラー語の文字列リスト。ファイルが存在しない場合は空。
     """
     if not file_path or not os.path.exists(file_path):
-        tqdm.write(f"[*] 注意: フィラーリストが見つかりません: {file_path} (デフォルトリストで続行します)")
-        return DEFAULT_FILLERS
+        tqdm.write(f"[*] 注意: フィラーリストが見つかりません: {file_path} ")
+        return []
 
     try:
         filler_list = read_lines_file(file_path)
     except FileReadError as e:
-        tqdm.write(f"[*] 警告: フィラーリストの読み込み中にエラーが発生しました（デフォルトリストで続行します）: {e}")
-        return DEFAULT_FILLERS
+        tqdm.write(f"[*] 警告: フィラーリストの読み込み中にエラーが発生しました: {e}")
+        return []
 
     filler_filename = os.path.basename(file_path)
 
     # ファイルはあるが中身が空（コメント行のみ等）の場合もデフォルトに切り替える
     if not filler_list:
-        tqdm.write(f"[*] 注意: フィラーリスト [{filler_filename}] が空です（デフォルトリストで続行します）")
-        return DEFAULT_FILLERS
+        tqdm.write(f"[*] 注意: フィラーリスト [{filler_filename}] が空です")
+        return []
 
     tqdm.write(f"[*] フィラーリスト [{filler_filename}] を読み込みました（登録数: {len(filler_list)} 語）")
     return filler_list

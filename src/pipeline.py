@@ -84,8 +84,11 @@ def run(args) -> None:
     output_srt_path = get_unique_filepath(base_path + ".srt")
 
     # 全出力ファイルのパスを命名規則に従って一括生成する
-    # （output/whisper/<stem>_whisper.srt/json/txt / output/elyza/<stem>_elyza.txt）
     paths = build_output_paths(output_srt_path)
+
+    # 上記の build_output_paths 内でエラーがスローされた際、進行状況バーを破壊せず異常終了させるためのガード処理です
+    if not isinstance(paths, dict):
+        sys.exit(1)
 
     target_audio_file = args.input_file
     is_video_input    = ext_lower in VIDEO_EXTENSIONS
@@ -174,26 +177,30 @@ def run(args) -> None:
             tqdm.write(f"[*] LLM 処理時間: {llm_elapsed:.2f} 秒")
 
             # LLM 校正後のテキストをプレーンテキストとして保存する
-            # output/elyza/<stem>_elyza.txt
+            # output/refined/<stem>_refined.txt
             try:
-                save_segments_as_plaintext(llm_refined_segments, paths["elyza_txt"])
-                tqdm.write(f"[*] LLM 校正テキストを保存しました: {paths['elyza_txt']}")
+                save_segments_as_plaintext(llm_refined_segments, paths["refined_txt"])
+                tqdm.write(f"[*] LLM 校正テキストを保存しました: {paths['refined_txt']}")
             except FileWriteError as e:
                 tqdm.write(f"[警告] LLM 校正テキストの保存中にエラーが発生しました（処理は続行します）: {e}")
 
         pbar.update(1)
 
-        # 【工程 5/5】BudouX による 10〜20 文字カット + SRT ファイルへの書き出し
+        # 【工程 5/5】BudouX による文字数カット + ファイルの書き出し
         try:
-            if args.no_llm:
-                # --no-llm 時は通常版パスに Whisper 版のみを出力する
-                write_srt_file(whisper_only_segments, output_srt_path)
-            else:
-                # LLM 校正版（メイン出力）と Whisper 版（比較用）を両方出力する
-                write_srt_file(llm_refined_segments,   paths["elyza_srt"])
-                write_srt_file(whisper_only_segments,   paths["whisper_srt"])
+            # 【どんな状態でも、ベースとなる Whisper に関する 3 ファイルは必ず生成されます】
+            write_srt_file(whisper_only_segments, paths["whisper_srt"])          # srt/ フォルダへ
+            save_segments_as_json(whisper_only_segments, paths["whisper_json"])  # transcript/ フォルダへ
+            save_segments_as_plaintext(whisper_only_segments, paths["whisper_txt"]) # text/ フォルダへ
+
+            # 【no_llm ではない場合（else）は、追加で refined の 3 ファイルが生成され、計 6 ファイルになります】
+            if not args.no_llm:
+                write_srt_file(llm_refined_segments, paths["refined_srt"])          # srt/ フォルダへ
+                save_segments_as_json(llm_refined_segments, paths["refined_json"])  # transcript/ フォルダへ
+                save_segments_as_plaintext(llm_refined_segments, paths["refined_txt"]) # text/ フォルダへ
+                
         except FileWriteError as e:
-            tqdm.write(f"[エラー] SRT ファイルの書き出しに失敗しました: {e}")
+            tqdm.write(f"[エラー] 成果物ファイルの書き出しに失敗しました: {e}")
             sys.exit(1)
 
         pbar.update(1)
@@ -212,12 +219,16 @@ def run(args) -> None:
 
     # 成果物のパスと総処理時間をまとめて表示する
     tqdm.write("")
-    if args.no_llm:
-        tqdm.write(f"[+] 【出力ファイル（Whisper 版）】{output_srt_path}")
-    else:
-        tqdm.write(f"[+] 【LLM 校正版 SRT 】{paths['elyza_srt']}")
-        tqdm.write(f"[+] 【LLM 校正テキスト】{paths['elyza_txt']}")
-        tqdm.write(f"[+] 【Whisper 版 SRT  】{paths['whisper_srt']}")
-        tqdm.write(f"[+] 【Whisper JSON    】{paths['whisper_json']}")
-        tqdm.write(f"[+] 【Whisper テキスト】{paths['whisper_txt']}")
+
+    # Whisperの出力ファイル群
+    tqdm.write(f"[+] 【Whisper 版 SRT 】{paths['whisper_srt']}")
+    tqdm.write(f"[+] 【Whisper 生データ】{paths['whisper_json']}")
+    tqdm.write(f"[+] 【Whisper テキスト】{paths['whisper_txt']}")
+
+    # LLMの出力ファイル群
+    if not args.no_llm:
+        tqdm.write(f"[+] 【LLM 校正版 SRT 】{paths['refined_srt']}")
+        tqdm.write(f"[+] 【LLM 生データ   】{paths['refined_txt']}")
+        tqdm.write(f"[+] 【LLM 校正テキスト】{paths['refined_txt']}")
+
     tqdm.write(f"[*] 総処理時間: {time.perf_counter() - start_time:.2f} 秒")

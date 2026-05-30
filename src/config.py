@@ -12,26 +12,33 @@ config.py
 # =====================================================================
 
 # --- 入力ファイルのデフォルトパス ---
-DEFAULT_AUDIO_FILE  = "./data/test.m4a"           # 引数なしで実行した際に自動で読み込まれる既定の音声・動画ファイル
+DEFAULT_AUDIO_FILE  = "./input/test.m4a"           # 引数なしで実行した際に自動で読み込まれる既定の音声・動画ファイル
 DEFAULT_DICT_FILE   = "./resources/dictionary.txt" # 優先的に認識させたい固有名詞・専門用語のテキストファイル
 DEFAULT_FILLER_FILE = "./resources/filler.txt"     # 除去したいフィラー語（「えっと」「あのー」等）のテキストファイル
 DEFAULT_PROMPT_FILE = "./resources/prompt.txt"     # LLM 校正に使うプロンプトテンプレートのテキストファイル
+
+# --- 入力ファイルのデフォルトパス ---
+OUTPUT_SRT_DIR        = "./output/srt"             # 生成された字幕ファイル(srt形式)
+OUTPUT_TRANSCRIPT_DIR = "./output/transcript"      # 生成されたwhisperの生データファイル(json形式)
+OUTPUT_TEXT_DIR       = "./output/text"            # 生成された全てのテキストをまとめたファイル(txt形式)
 
 # --- Whisper ---
 DEFAULT_MODEL_SIZE = "base"  # モデルサイズ（速度優先: tiny/base、精度優先: small/medium/large）
 
 # --- LLM（ELYZA 等） ---
 LLM_MODEL_NAME  = "hf.co/mmnga/Llama-3-ELYZA-JP-8B-gguf"  # 使用する Ollama モデル名
-BATCH_SIZE_LLM  = 10  # LLM に一度に送るセグメント数の上限（大きいほど処理は速いが、応答精度が下がることがある）
+BATCH_SIZE_LLM  = 10  # LLM に一度に送る字幕セグメントの数（前後文脈を持たせる単位）
 
-# --- 字幕レイアウト ---
-MIN_CHAR_LEN = 10  # 1 行の最低文字数（これより短い末尾行は直前行への結合を試みます）
-MAX_CHAR_LEN = 20  # 1 行の最大文字数（絶対にこの文字数を超えないようにガードします）
+# --- テロップデザインルール（字幕の改行制御） ---
+MIN_CHAR_LEN = 10   # 1 行あたりの最低文字数（これ未満の短い行は、極力前の行と結合する）
+MAX_CHAR_LEN = 20   # 1 行あたりの最高文字数（これを超える場合は、BudouX の文節で美しく改行する）
 
-# --- 動作設定 ---
-REMOVE_TEMP_AUDIO = False  # 動画から抽出した一時音声ファイルを処理後に削除するか（True=削除 / False=残す）
-VIDEO_EXTENSIONS  = [".mp4", ".mov", ".mkv", ".avi", ".wmv", ".flv", ".webm"]  # 動画と判定する拡張子リスト
+# --- クリーンアップ設定 ---
+REMOVE_TEMP_AUDIO = True  # 動画から抽出した一時的な wav 音声ファイルを、処理終了後に自動削除するかどうか
 
-# --- フィラーリストのデフォルト値 ---
-# resources/filler.txt が見つからない場合にフォールバックとして使用されるリスト
-DEFAULT_FILLERS = ["えっと", "あの", "あのー", "えー", "まあ", "そのー", "なんか", "うーん"]
+# =====================================================================
+# システム固定エリア：ここは原則変更しないでください
+# =====================================================================
+
+# 動画ファイルの拡張子リスト（これらに該当する場合は自動で音声抽出処理を挟みます）
+VIDEO_EXTENSIONS = [".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm"]
